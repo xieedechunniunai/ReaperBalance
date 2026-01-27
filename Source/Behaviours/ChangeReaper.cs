@@ -9,25 +9,41 @@ using GlobalSettings;
 namespace ReaperBalance.Source.Behaviours;
 
 /// <summary>
-/// Singleton component that listens for T key press and spawns Song Knight CrossSlash prefab at hero position.
+/// Component that modifies Reaper-related behavior and assets.
 /// </summary>
 internal sealed class ChangeReaper : MonoBehaviour
 {
-    #region Singleton Implementation
-    /// <summary>
-    /// Gets the singleton instance of ChangeReaper.
-    /// </summary>
-    public static ChangeReaper Instance
-    {
-        get; private set;
-    }
-
+    #region Lifecycle
     private void Awake()
     {
-        Instance = this;
-
         // Start initialization
         StartCoroutine(Initialize());
+    }
+
+    /// <summary>
+    /// 统一入口：应用所有修改（非每帧调用）
+    /// </summary>
+    public void ApplyAllChanges(string reason)
+    {
+        if (!_isInitialized)
+        {
+            StartCoroutine(ApplyAllChangesWhenReady(reason));
+            return;
+        }
+
+        ApplyAllChangesInternal(reason);
+    }
+
+    private IEnumerator ApplyAllChangesWhenReady(string reason)
+    {
+        yield return new WaitUntil(() => _isInitialized);
+        ApplyAllChangesInternal(reason);
+    }
+
+    private void ApplyAllChangesInternal(string reason)
+    {
+        Log.Info($"应用ReaperBalance更新: {reason}");
+        ForceUpdateConfig();
     }
     /// <summary>
     /// 强制更新所有配置
@@ -43,11 +59,12 @@ internal sealed class ChangeReaper : MonoBehaviour
         _lastCollectRange = -1f;
         _lastDamageMultiplier = -1f;
 
-        // 立即更新预制体缩放
-        if (_cachedCrossSlashPrefab != null)
+        // 从AssetPool获取缓存的预制体
+        var cachedPrefab = _assetManager.GetCachedPrefab(CROSS_SLASH_PREFAB_NAME);
+        if (cachedPrefab != null)
         {
-            UpdatePrefabScale();
-            UpdatePrefabDamage(_cachedCrossSlashPrefab);
+            UpdatePrefabScale(cachedPrefab);
+            UpdatePrefabDamage(cachedPrefab);
         }
 
         // 更新普通攻击倍率
@@ -55,6 +72,11 @@ internal sealed class ChangeReaper : MonoBehaviour
 
         // 更新ReaperSilk范围
         UpdateReaperSilkRange();
+
+        _lastCrossSlashScale = Plugin.CrossSlashScale.Value;
+        _lastCollectRange = Plugin.CollectRange.Value;
+        _lastDamageMultiplier = Plugin.DamageMultiplier.Value;
+        _lastNailUpgrades = GetCurrentNailUpgrades();
 
         Log.Info("强制配置更新完成");
     }
@@ -65,12 +87,12 @@ internal sealed class ChangeReaper : MonoBehaviour
     private HeroController _heroController;
     private AssetManager _assetManager;
 
-    // 静态缓存：存储预制体引用，避免重复获取
-    private static GameObject _cachedCrossSlashPrefab = null;
-    private static GameObject _cacheContainer = null;
+    // AssetPool中的预制体名称常量
+    private const string CROSS_SLASH_PREFAB_NAME = "Song Knight CrossSlash Cached";
+
     // 保存原始的FSM动作，用于重置
     private FsmStateAction[] _originalDoSlashActions = null;
-    private static bool _isPrefabCached = false;
+
     // 响应式伤害计算相关
     private int _lastNailUpgrades = -1;
     // 配置监听相关
@@ -80,10 +102,14 @@ internal sealed class ChangeReaper : MonoBehaviour
     private IEnumerator Initialize()
     {
         _heroController = HeroController.instance;
+        _assetManager = GetComponent<AssetManager>();
+        if (_assetManager == null)
+        {
+            Log.Error("AssetManager is missing on ReaperBalanceManager.");
+            yield break;
+        }
         // Wait for AssetManager to be ready
-        yield return new WaitUntil(() => AssetManager.Instance != null && AssetManager.Instance.IsInitialized());
-
-        _assetManager = AssetManager.Instance;
+        yield return new WaitUntil(() => _assetManager.IsInitialized());
 
         // 预加载并缓存预制体
         yield return PreloadAndCachePrefab();
@@ -99,22 +125,27 @@ internal sealed class ChangeReaper : MonoBehaviour
     }
 
     /// <summary>
-    /// 预加载并缓存预制体
+    /// 预加载并缓存预制体到AssetPool
     /// </summary>
     private IEnumerator PreloadAndCachePrefab()
     {
-        if (_isPrefabCached && _cachedCrossSlashPrefab != null)
+        // Check if already cached in AssetPool
+        if (_assetManager.IsPrefabCached(CROSS_SLASH_PREFAB_NAME))
         {
-            Log.Info("CrossSlash prefab already cached, skipping preload");
-            yield break;
+            var existing = _assetManager.GetCachedPrefab(CROSS_SLASH_PREFAB_NAME);
+            if (existing != null)
+            {
+                Log.Info("CrossSlash prefab already cached in AssetPool, skipping preload");
+                yield break;
+            }
         }
 
-        Log.Info("Preloading and caching CrossSlash prefab...");
+        Log.Info("Preloading and caching CrossSlash prefab to AssetPool...");
 
         // 调试所有可用的资源
         DebugAvailableAssets();
 
-        // 从AssetManager获取预制体
+        // 从AssetManager获取原始预制体
         GameObject crossSlashPrefab = _assetManager.Get<GameObject>("Song Knight CrossSlash Friendly");
         if (crossSlashPrefab == null)
         {
@@ -123,44 +154,30 @@ internal sealed class ChangeReaper : MonoBehaviour
         }
 
         // 创建预制体的副本进行修改，不修改原始预制体
-        _cachedCrossSlashPrefab = Instantiate(crossSlashPrefab);
-        _cachedCrossSlashPrefab.SetActive(false); // 设置为非激活状态
+        GameObject cachedPrefab = Instantiate(crossSlashPrefab);
+        cachedPrefab.name = CROSS_SLASH_PREFAB_NAME;
+        cachedPrefab.SetActive(false);
+        cachedPrefab.transform.localScale = Vector3.one * Plugin.CrossSlashScale.Value;
 
-        // 修复DontDestroyOnLoad问题：创建一个根GameObject作为容器
-        if (_cacheContainer == null)
-        {
-            _cacheContainer = new GameObject("CrossSlashPrefabCache");
-            DontDestroyOnLoad(_cacheContainer);
-        }
-        _cachedCrossSlashPrefab.transform.SetParent(_cacheContainer.transform);
-        _cachedCrossSlashPrefab.transform.localScale = Vector3.one * Plugin.CrossSlashScale.Value;
+        // 修改预制体的DamageEnemies组件 - 确保 IsUsingNeedleDamageMult = true
+        ModifyPrefabDamageEnemiesComponents(cachedPrefab);
+
+        // 存储到AssetPool（会自动设置parent并保持inactive）
+        _assetManager.StorePrefabInPool(CROSS_SLASH_PREFAB_NAME, cachedPrefab);
+
         _lastCrossSlashScale = Plugin.CrossSlashScale.Value;
         _lastDamageMultiplier = Plugin.DamageMultiplier.Value;
 
-        // 修改预制体的DamageEnemies组件
-        ModifyPrefabDamageEnemiesComponents(_cachedCrossSlashPrefab);
-
-        _isPrefabCached = true;
-
-        Log.Info("CrossSlash prefab cached and modified successfully");
-    }
-
-    private void Update()
-    {
-        if (!_isInitialized) return;
-        // 检查全局开关
-        if (!Plugin.IsReaperBalanceEnabled) return;
-        // 响应式伤害更新：如果nailUpgrades发生变化，更新伤害
-        UpdateDamageIfNeeded();
-        UpdateConfigIfNeeded();
+        Log.Info("CrossSlash prefab cached to AssetPool and modified successfully");
     }
 
     private void SpawnCrossSlash()
     {
-        // 检查缓存是否有效
-        if (!_isPrefabCached || _cachedCrossSlashPrefab == null)
+        // 从AssetPool获取缓存的预制体
+        var cachedPrefab = _assetManager.GetCachedPrefab(CROSS_SLASH_PREFAB_NAME);
+        if (cachedPrefab == null)
         {
-            Log.Error("CrossSlash prefab not cached! Please wait for initialization to complete.");
+            Log.Error("CrossSlash prefab not found in AssetPool! Please wait for initialization to complete.");
             return;
         }
 
@@ -179,16 +196,18 @@ internal sealed class ChangeReaper : MonoBehaviour
         Vector3 heroPosition = _heroController.transform.position;
         Quaternion spawnRotation = GetSpawnRotation();
 
-        // Instantiate the prefab at hero position with correct rotation
-        GameObject crossSlashInstance = Instantiate(_cachedCrossSlashPrefab, heroPosition, spawnRotation);
+        // Instantiate from AssetPool prefab at hero position with correct rotation
+        // Note: Instance is created in scene, not in AssetPool
+        GameObject crossSlashInstance = Instantiate(cachedPrefab, heroPosition, spawnRotation);
 
-        // Make sure the instance is active
+        // Make sure the instance is active and not parented to AssetPool
+        crossSlashInstance.transform.SetParent(null);
         crossSlashInstance.SetActive(true);
 
-        Log.Info($"Spawned Song Knight CrossSlash at hero position: {heroPosition} with rotation: {spawnRotation}");
+        Log.Info($"Spawned Song Knight CrossSlash from AssetPool at hero position: {heroPosition}");
 
-        // 实例已经包含了修改后的组件，无需再次修改
-        Log.Debug("CrossSlash instance spawned with pre-modified components");
+        // 实例已经包含了修改后的组件（包括 IsUsingNeedleDamageMult = true），无需再次修改
+        Log.Debug("CrossSlash instance spawned with pre-modified components (IsUsingNeedleDamageMult = true)");
     }
     /// <summary>
     /// 响应式配置更新
@@ -198,19 +217,21 @@ internal sealed class ChangeReaper : MonoBehaviour
         if (!Plugin.IsReaperBalanceEnabled)
             return;
 
+        var cachedPrefab = _assetManager?.GetCachedPrefab(CROSS_SLASH_PREFAB_NAME);
+
         // 检查十字斩缩放大小是否变化
-        if (Plugin.CrossSlashScale.Value != _lastCrossSlashScale && _cachedCrossSlashPrefab != null)
+        if (Plugin.CrossSlashScale.Value != _lastCrossSlashScale && cachedPrefab != null)
         {
             _lastCrossSlashScale = Plugin.CrossSlashScale.Value;
-            UpdatePrefabScale();
+            UpdatePrefabScale(cachedPrefab);
             Log.Info($"响应式更新十字斩缩放大小: {_lastCrossSlashScale}");
         }
 
         // 检查伤害倍率是否变化
-        if (Plugin.DamageMultiplier.Value != _lastDamageMultiplier && _cachedCrossSlashPrefab != null)
+        if (Plugin.DamageMultiplier.Value != _lastDamageMultiplier && cachedPrefab != null)
         {
             _lastDamageMultiplier = Plugin.DamageMultiplier.Value;
-            UpdatePrefabDamage(_cachedCrossSlashPrefab);
+            UpdatePrefabDamage(cachedPrefab);
             Log.Info($"响应式更新伤害倍率: {_lastDamageMultiplier}");
         }
 
@@ -231,27 +252,38 @@ internal sealed class ChangeReaper : MonoBehaviour
         if (!Plugin.IsReaperBalanceEnabled)
             return;
 
-        if (GameManager.instance == null || GameManager.instance.playerData == null)
+        int currentNailUpgrades = GetCurrentNailUpgrades();
+        if (currentNailUpgrades < 0)
             return;
 
-        int currentNailUpgrades = GameManager.instance.playerData.nailUpgrades;
+        var cachedPrefab = _assetManager?.GetCachedPrefab(CROSS_SLASH_PREFAB_NAME);
 
         // 如果nailUpgrades发生变化，更新预制体伤害
-        if (currentNailUpgrades != _lastNailUpgrades && _cachedCrossSlashPrefab != null)
+        if (currentNailUpgrades != _lastNailUpgrades && cachedPrefab != null)
         {
             _lastNailUpgrades = currentNailUpgrades;
-            UpdatePrefabDamage(_cachedCrossSlashPrefab);
+            UpdatePrefabDamage(cachedPrefab);
             Log.Info($"响应式更新伤害值：nailUpgrades = {currentNailUpgrades}");
         }
+    }
+
+    private int GetCurrentNailUpgrades()
+    {
+        if (GameManager.instance == null || GameManager.instance.playerData == null)
+        {
+            return -1;
+        }
+
+        return GameManager.instance.playerData.nailUpgrades;
     }
     /// <summary>
     /// 更新预制体缩放大小
     /// </summary>
-    private void UpdatePrefabScale()
+    private void UpdatePrefabScale(GameObject prefab)
     {
-        if (_cachedCrossSlashPrefab != null)
+        if (prefab != null)
         {
-            _cachedCrossSlashPrefab.transform.localScale = Vector3.one * Plugin.CrossSlashScale.Value;
+            prefab.transform.localScale = Vector3.one * Plugin.CrossSlashScale.Value;
             Log.Info($"更新预制体缩放大小: {Plugin.CrossSlashScale.Value}");
         }
     }
@@ -262,7 +294,12 @@ internal sealed class ChangeReaper : MonoBehaviour
     private void UpdateReaperSilkRange()
     {
         // 更新预制体上的组件
-        var reaperSilkBundle = AssetManager.Instance?.Get<GameObject>("Reaper Silk Bundle");
+        if (_assetManager == null)
+        {
+            Log.Warn("AssetManager is not ready for range update.");
+            return;
+        }
+        var reaperSilkBundle = _assetManager.Get<GameObject>("Reaper Silk Bundle");
         if (reaperSilkBundle != null)
         {
             var modifier = reaperSilkBundle.GetComponent<ReaperSilkRangeModifier>();
@@ -296,11 +333,6 @@ internal sealed class ChangeReaper : MonoBehaviour
                 modifier.CollectRange = Plugin.CollectRange.Value;
                 updatedCount++;
             }
-        }
-
-        if (updatedCount > 0)
-        {
-            Log.Info($"更新了 {updatedCount} 个ReaperSilk实例的吸收范围");
         }
     }
     /// <summary>
@@ -405,6 +437,7 @@ internal sealed class ChangeReaper : MonoBehaviour
 
     /// <summary>
     /// 修改单个GameObject中的DamageEnemies组件
+    /// 关键：确保 hitInstance.IsUsingNeedleDamageMult = true
     /// </summary>
     private void ModifySingleDamageEnemies(GameObject damagerObject, string damagerName)
     {
@@ -415,10 +448,13 @@ internal sealed class ChangeReaper : MonoBehaviour
             Log.Warn($"DamageEnemies component not found on {damagerName}");
             return;
         }
-        // 启用useHeroDamageAffectors
-        damageEnemies.useHeroDamageAffectors = true;
-        damageEnemies.isHeroDamage = true;
-        Log.Info($"Enabled useHeroDamageAffectors on {damagerName}");
+
+        // 关键设置：确保 IsUsingNeedleDamageMult = true
+        // 在 DamageEnemies.DoDamage() 中: IsUsingNeedleDamageMult = (this.useNailDamage || this.useHeroDamageAffectors)
+        damageEnemies.useNailDamage = true;           // 启用钉子伤害计算
+        damageEnemies.useHeroDamageAffectors = true;  // 启用英雄伤害影响因子
+        damageEnemies.isHeroDamage = true;            // 标记为英雄伤害
+        Log.Info($"Enabled useNailDamage + useHeroDamageAffectors on {damagerName} (IsUsingNeedleDamageMult = true)");
 
         // 修改damageAsset的IntReference.Value
         if (damageEnemies.damageAsset != null)
@@ -444,7 +480,6 @@ internal sealed class ChangeReaper : MonoBehaviour
         // 修改attackType为Nail
         damageEnemies.attackType = AttackTypes.Nail;
         Log.Info($"Set {damagerName} attackType to Nail");
-
     }
     /// <summary>
     /// 更新单个GameObject的伤害值
@@ -474,15 +509,16 @@ internal sealed class ChangeReaper : MonoBehaviour
     /// </summary>
     public bool IsInitialized()
     {
-        return _isInitialized && Instance != null; ;
+        return _isInitialized;
     }
 
     /// <summary>
-    /// Check if the CrossSlash prefab is cached.
+    /// Check if the CrossSlash prefab is cached in AssetPool.
     /// </summary>
     public bool IsPrefabCached()
     {
-        return _isPrefabCached && _cachedCrossSlashPrefab != null;
+        if (_assetManager == null) return false;
+        return _assetManager.IsPrefabCached(CROSS_SLASH_PREFAB_NAME);
     }
 
     private void DebugAvailableAssets()
@@ -566,7 +602,8 @@ internal sealed class ChangeReaper : MonoBehaviour
                             var customAction = new CustomSpawnAction
                             {
                                 Owner = nailArtsFSM.gameObject,
-                                Fsm = nailArtsFSM
+                                Fsm = nailArtsFSM,
+                                Reaper = this
                             };
                             actionsList[i] = customAction;
                         }
@@ -601,18 +638,19 @@ internal sealed class ChangeReaper : MonoBehaviour
     {
         public GameObject Owner { get; set; }
         public PlayMakerFSM Fsm { get; set; }
+        public ChangeReaper Reaper { get; set; }
 
         public override void OnEnter()
         {
             try
             {
-                if (ChangeReaper.Instance != null && ChangeReaper.Instance.IsInitialized())
+                if (Reaper != null && Reaper.IsInitialized())
                 {
-                    ChangeReaper.Instance.SpawnCrossSlash();
+                    Reaper.SpawnCrossSlash();
                 }
                 else
                 {
-                    ReaperBalance.Source.Log.Error("ChangeReaper实例未初始化，无法生成攻击");
+                    ReaperBalance.Source.Log.Error("ChangeReaper未初始化，无法生成攻击");
                 }
 
                 Finish();
@@ -714,13 +752,13 @@ internal sealed class ChangeReaper : MonoBehaviour
             return;
         }
 
-        if (AssetManager.Instance == null)
+        if (_assetManager == null)
         {
             Log.Error("AssetManager instance is null!");
             return;
         }
 
-        var ReaperSilkBundle = AssetManager.Instance.Get<GameObject>("Reaper Silk Bundle");
+        var ReaperSilkBundle = _assetManager.Get<GameObject>("Reaper Silk Bundle");
         if (ReaperSilkBundle == null)
         {
             Log.Error("Reaper Silk Bundle not found!");
@@ -1072,13 +1110,13 @@ internal sealed class ChangeReaper : MonoBehaviour
     }
     private void ResetReaperSilk()
     {
-        if (AssetManager.Instance == null)
+        if (_assetManager == null)
         {
             Log.Error("AssetManager instance is null!");
             return;
         }
 
-        var ReaperSilkBundle = AssetManager.Instance.Get<GameObject>("Reaper Silk Bundle");
+        var ReaperSilkBundle = _assetManager.Get<GameObject>("Reaper Silk Bundle");
         if (ReaperSilkBundle == null)
         {
             Log.Error("Reaper Silk Bundle not found!");
