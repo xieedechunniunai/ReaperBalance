@@ -14,6 +14,8 @@ using Silksong.ModMenu.Models;
 using Silksong.ModMenu.Plugin;
 using Silksong.ModMenu.Screens;
 using System.Collections;
+using UnityEngine.UI;
+using UnityEngine.EventSystems;
 namespace ReaperBalance.Source;
 
 /// <summary>
@@ -229,8 +231,8 @@ public class Plugin : BaseUnityPlugin, IModMenuCustomMenu
         };
         page1.Add(languageChoice);
 
-        // 通用攻击倍率 - 使用 ChoiceElement 保持对齐
-        var normalAttackChoice = CreateFloatChoice(
+        // 通用攻击倍率 - 使用 ChoiceElement + Slider 保持对齐且支持拖动
+        var normalAttackChoice = CreateFloatChoiceWithSlider(
             Tr("Normal Attack Multiplier", "普通攻击倍率"),
             Tr("Damage multiplier for normal attacks", "普通攻击的伤害倍率"),
             NormalAttackMultiplier,
@@ -240,7 +242,7 @@ public class Plugin : BaseUnityPlugin, IModMenuCustomMenu
             "ModMenu.NormalAttackMultiplier"
         );
         page1.Add(normalAttackChoice);
-        page1.Add(CreateFloatChoice(
+        page1.Add(CreateFloatChoiceWithSlider(
             Tr("Down Slash Multiplier", "下劈攻击倍率"),
             Tr("Damage multiplier for down slash attacks", "下劈攻击的伤害倍率"),
             DownSlashMultiplier,
@@ -249,7 +251,7 @@ public class Plugin : BaseUnityPlugin, IModMenuCustomMenu
             0.1f,
             "ModMenu.DownSlashMultiplier"
         ));
-        page1.Add(CreateFloatChoice(
+        page1.Add(CreateFloatChoiceWithSlider(
             Tr("Stun Damage Multiplier", "眩晕值倍率"),
             Tr("Stun damage multiplier (Normal/Down/Cross)", "影响普攻/下劈/十字斩的眩晕值"),
             StunDamageMultiplier,
@@ -301,8 +303,8 @@ public class Plugin : BaseUnityPlugin, IModMenuCustomMenu
         // Page 2: 持续时间, 丝球吸引设置
         var page2 = new VerticalGroup();
 
-        // 持续时间倍率 - 使用 ChoiceElement 保持对齐
-        page2.Add(CreateFloatChoice(
+        // 持续时间倍率 - 使用 ChoiceElement + Slider 保持对齐且支持拖动
+        page2.Add(CreateFloatChoiceWithSlider(
             Tr("Duration Multiplier", "持续时间倍率"),
             Tr("Reaper mode duration multiplier", "收割者模式持续时间倍率"),
             DurationMultiplier,
@@ -311,7 +313,7 @@ public class Plugin : BaseUnityPlugin, IModMenuCustomMenu
             0.2f,
             "ModMenu.DurationMultiplier"
         ));
-        page2.Add(CreateFloatChoice(
+        page2.Add(CreateFloatChoiceWithSlider(
             Tr("Silk Orb Drop Multiplier", "丝球掉落倍率"),
             Tr("Silk orb drop multiplier in Reaper mode", "收割模式攻击敌人时掉落丝球的倍率"),
             ReaperBundleMultiplier,
@@ -516,6 +518,523 @@ public class Plugin : BaseUnityPlugin, IModMenuCustomMenu
 
         return element;
     }
+
+    /// <summary>
+    /// 创建带滑动条的浮点数选项 ChoiceElement（结合 Choice 的布局/描述 与 Slider 的拖动交互）
+    /// </summary>
+    private static ChoiceElement<float> CreateFloatChoiceWithSlider(
+        string label,
+        string description,
+        ConfigEntry<float> entry,
+        float min,
+        float max,
+        float step,
+        string refreshReason
+    )
+    {
+        // === Choice 侧（保留现有布局与描述） ===
+        var values = new System.Collections.Generic.List<float>();
+        for (float v = min; v <= max + step * 0.5f; v += step)
+        {
+            values.Add((float)System.Math.Round(v, 3));
+        }
+
+        var choiceModel = new ListChoiceModel<float>(values)
+        {
+            Circular = false,
+            DisplayFn = (_, v) => v.ToString("0.###")
+        };
+
+        // 设置初始值（找到最接近的）
+        float clamped = Mathf.Clamp(entry.Value, min, max);
+        int closestIndex = 0;
+        float minDiff = float.MaxValue;
+        for (int i = 0; i < values.Count; i++)
+        {
+            float diff = Mathf.Abs(values[i] - clamped);
+            if (diff < minDiff)
+            {
+                minDiff = diff;
+                closestIndex = i;
+            }
+        }
+        choiceModel.Index = closestIndex;
+
+        var choiceElement = new ChoiceElement<float>(label, choiceModel, description)
+        {
+            Value = values[closestIndex]
+        };
+
+        // === Slider 侧（借用 prefab 并嵌入） ===
+        int ticks = values.Count;
+        if (ticks < 2) ticks = 2;
+
+        var sliderModel = new LinearFloatSliderModel(min, max, ticks)
+        {
+            DisplayFn = (_, v) => v.ToString("0.###")
+        };
+        // Keep slider model aligned with the discrete tick list.
+        sliderModel.SetValue(values[closestIndex]);
+
+        // 创建临时 SliderElement 以获取 slider prefab
+        var tempSliderElement = new SliderElement<float>("_temp_", sliderModel);
+        var sliderGO = tempSliderElement.Slider.gameObject;
+
+        // 隐藏 slider 自己的 label（避免与 Choice 的 label 重复）
+        if (tempSliderElement.LabelText != null)
+        {
+            tempSliderElement.LabelText.gameObject.SetActive(false);
+        }
+
+        // 获取 Choice 的 ChoiceText（值显示区域）的 RectTransform
+        var choiceTextRect = choiceElement.ChoiceText.GetComponent<RectTransform>();
+
+        // 将 slider 移动到 Choice 的 ValueChoice 节点内（与 Menu Option Text 同级）
+        var sliderRect = sliderGO.GetComponent<RectTransform>();
+        var valueChoiceParent = choiceTextRect.transform.parent;
+        if (valueChoiceParent != null)
+        {
+            sliderGO.transform.SetParent(valueChoiceParent, false);
+            // 让 slider 的层级与 Menu Option Text 保持一致，避免遮挡/裁剪异常
+            sliderRect.SetSiblingIndex(choiceTextRect.transform.GetSiblingIndex());
+        }
+        else
+        {
+            // fallback: keep old behavior
+            sliderGO.transform.SetParent(choiceElement.Container.transform, false);
+        }
+
+        // 对齐 slider 到 ChoiceText 的位置，但缩小检测区域（右对齐）
+        float originalSliderHeight = sliderRect.sizeDelta.y;
+        sliderRect.anchorMin = choiceTextRect.anchorMin;
+        sliderRect.anchorMax = choiceTextRect.anchorMax;
+        sliderRect.pivot = choiceTextRect.pivot;
+
+        // 检测区域缩小到 50%，向右偏移后再向左移动 25%
+        float widthRatio = 0.5f;
+        float originalWidth = choiceTextRect.sizeDelta.x;
+        float newWidth = originalWidth * widthRatio;
+        float widthDiff = originalWidth - newWidth;
+        float leftShift = originalWidth * 0.25f; // 向左移动 25%
+
+        sliderRect.anchoredPosition = choiceTextRect.anchoredPosition + new Vector2(widthDiff - leftShift, 0);
+        sliderRect.sizeDelta = new Vector2(newWidth, Mathf.Max(11f, originalSliderHeight));
+
+        // 调整内部轨道组件的锚点，让轨道向左延伸保持原始视觉宽度
+        // anchorMin.x = -1 表示向左延伸一倍容器宽度，总宽度 = 2 * newWidth = originalWidth
+        float trackAnchorMinX = -1f;
+        foreach (Transform child in sliderGO.transform)
+        {
+            var childRect = child.GetComponent<RectTransform>();
+            if (childRect == null) continue;
+
+            string childName = child.name.ToLowerInvariant();
+            // 只调整滑动条轨道相关组件，跳过文本/光标等
+            if (childName.Contains("background") || childName.Contains("fill") || childName.Contains("handle") || childName.Contains("slider"))
+            {
+                // 向左延伸，使轨道视觉宽度恢复原始大小
+                childRect.anchorMin = new Vector2(trackAnchorMinX, childRect.anchorMin.y);
+                childRect.offsetMin = new Vector2(0, childRect.offsetMin.y);
+            }
+        }
+
+        // 隐藏 Choice 的 ChoiceText，保留 slider 的 ValueText 显示数值
+        choiceElement.ChoiceText.gameObject.SetActive(false);
+
+        // Ensure slider thumb position matches the current value immediately.
+        // Runtime evidence (run7) shows the thumb stays at min (index 0) until first interaction.
+        try
+        {
+            if (tempSliderElement.Slider != null)
+            {
+                tempSliderElement.Slider.SetValueWithoutNotify(closestIndex);
+            }
+            // Disable slider-internal cursor visuals (runtime evidence: CursorHotspot/CursorLeft/CursorRight)
+            foreach (var t in sliderGO.GetComponentsInChildren<Transform>(true))
+            {
+                if (t.name == "CursorHotspot" || t.name == "CursorLeft" || t.name == "CursorRight")
+                {
+                    t.gameObject.SetActive(false);
+                }
+            }
+
+            // Forward slider hover to the underlying ValueChoice so description behaves like Choice.
+            if (valueChoiceParent != null)
+            {
+                AttachPointerProxy(sliderGO, valueChoiceParent.gameObject, $"SliderToValueChoice:{label}", choiceElement.DescriptionText);
+            }
+
+            // Ensure mouse hover selects the Choice row, so description shows as expected.
+            AttachForceSelect(
+                choiceElement.LabelText.gameObject,
+                choiceElement.SelectableComponent.gameObject,
+                $"ChoiceLabel:{label}",
+                selectOnEnter: true,
+                selectOnDown: true
+            );
+            AttachForceSelect(
+                choiceElement.SelectableComponent.gameObject,
+                choiceElement.SelectableComponent.gameObject,
+                $"ChoiceSelectable:{label}",
+                selectOnEnter: true,
+                selectOnDown: true
+            );
+            // Slider tends to steal selection; redirect it back to the Choice row.
+            AttachForceSelect(
+                sliderGO,
+                choiceElement.SelectableComponent.gameObject,
+                $"SliderRedirect:{label}",
+                selectOnEnter: false,
+                selectOnDown: true
+            );
+        }
+        catch
+        {
+            // ignore
+        }
+
+        // 销毁临时 SliderElement 的原容器（slider 已被搬走）
+        if (tempSliderElement.Container != null && tempSliderElement.Container != sliderGO)
+        {
+            UnityEngine.Object.Destroy(tempSliderElement.Container);
+        }
+
+        // === 双向同步 ===
+        bool isSyncing = false;
+
+        // 用于防抖：监听 slider 拖动结束（而不是值变化），避免松开鼠标时误触发 ChoiceElement 的点击
+        var debounceState = new SliderDebounceState();
+        AttachSliderDragEndTracker(sliderGO, debounceState);
+
+        // 当 ChoiceModel 改变（左右切换）：同步 sliderModel
+        choiceModel.OnValueChanged += value =>
+        {
+            if (isSyncing) return;
+
+            // 防抖：如果刚刚结束拖动 slider，忽略 ChoiceElement 的点击事件（松开鼠标时可能误触发）
+            if (debounceState.LastDragEndTime >= 0 && Time.unscaledTime - debounceState.LastDragEndTime < 0.2f)
+            {
+                return;
+            }
+
+            isSyncing = true;
+
+            entry.Value = value;
+            sliderModel.SetValue(value);
+
+            var plugin = FindPlugin();
+            if (plugin != null)
+            {
+                plugin.RefreshReaperBalance(refreshReason, true);
+            }
+
+            isSyncing = false;
+        };
+
+        // 当 sliderModel 改变（拖动滑动条）：同步 choiceElement
+        sliderModel.OnValueChanged += value =>
+        {
+            if (isSyncing) return;
+            isSyncing = true;
+
+            // 找到最接近的 choice 值
+            int newClosestIndex = 0;
+            float newMinDiff = float.MaxValue;
+            for (int i = 0; i < values.Count; i++)
+            {
+                float diff = Mathf.Abs(values[i] - value);
+                if (diff < newMinDiff)
+                {
+                    newMinDiff = diff;
+                    newClosestIndex = i;
+                }
+            }
+
+            // 更新 choice model 并同步 entry（注意：由于 isSyncing=true，choiceModel.OnValueChanged 不会执行，所以这里需要手动更新 entry）
+            if (choiceModel.Index != newClosestIndex)
+            {
+                choiceModel.Index = newClosestIndex;
+            }
+            // 无论 index 是否改变，都需要更新 entry 并刷新（因为 isSyncing 会阻止 choiceModel.OnValueChanged 执行）
+            entry.Value = values[newClosestIndex];
+            var plugin = FindPlugin();
+            if (plugin != null)
+            {
+                plugin.RefreshReaperBalance(refreshReason, true);
+            }
+
+            isSyncing = false;
+        };
+
+        return choiceElement;
+    }
+
+    /// <summary>
+    /// 用于在 lambda 中共享防抖状态
+    /// </summary>
+    private sealed class SliderDebounceState
+    {
+        public float LastDragEndTime = -1f;
+    }
+
+    private static void AttachSliderDragEndTracker(GameObject sliderGO, SliderDebounceState state)
+    {
+        var tracker = sliderGO.GetComponent<AgentSliderDragEndTracker>();
+        if (tracker == null) tracker = sliderGO.AddComponent<AgentSliderDragEndTracker>();
+        tracker.DebounceState = state;
+    }
+
+    private sealed class AgentSliderDragEndTracker : MonoBehaviour, IEndDragHandler, IPointerUpHandler
+    {
+        public SliderDebounceState? DebounceState;
+
+        public void OnEndDrag(PointerEventData eventData)
+        {
+            RecordDragEnd();
+        }
+
+        public void OnPointerUp(PointerEventData eventData)
+        {
+            // 同时监听 PointerUp，因为有些情况下 EndDrag 可能不触发
+            RecordDragEnd();
+        }
+
+        private void RecordDragEnd()
+        {
+            if (DebounceState != null)
+            {
+                DebounceState.LastDragEndTime = Time.unscaledTime;
+            }
+        }
+    }
+
+    private static void AttachForceSelect(
+        GameObject target,
+        GameObject selectTarget,
+        string tag,
+        bool selectOnEnter,
+        bool selectOnDown
+    )
+    {
+        var f = target.GetComponent<AgentForceSelectOnHover>();
+        if (f == null) f = target.AddComponent<AgentForceSelectOnHover>();
+        f.SelectTarget = selectTarget;
+        f.Tag = tag;
+        f.SelectOnEnter = selectOnEnter;
+        f.SelectOnDown = selectOnDown;
+    }
+
+    private static void AttachPointerProxy(GameObject target, GameObject proxyTo, string tag, Text descText)
+    {
+        var p = target.GetComponent<AgentPointerProxy>();
+        if (p == null) p = target.AddComponent<AgentPointerProxy>();
+        p.ProxyTo = proxyTo;
+        p.Tag = tag;
+        p.DescText = descText;
+    }
+
+    private sealed class AgentPointerProxy : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler
+    {
+        public GameObject? ProxyTo;
+        public string Tag = "";
+        public Text? DescText;
+        private bool _hovered;
+        private float _lastForcedAtUnscaled;
+        private RectTransform? _selfRect;
+        private Canvas? _canvas;
+        private UnityEngine.Camera? _uiCam;
+        private bool _lastInside;
+        private bool _lastRaycastHover;
+        private static readonly System.Collections.Generic.List<RaycastResult> _raycastResults =
+            new System.Collections.Generic.List<RaycastResult>(32);
+
+        public void OnPointerEnter(PointerEventData eventData) => Forward(eventData, true);
+        public void OnPointerExit(PointerEventData eventData) => Forward(eventData, false);
+
+        private void Awake()
+        {
+            try
+            {
+                _selfRect = GetComponent<RectTransform>();
+                _canvas = GetComponentInParent<Canvas>();
+                if (_canvas != null && _canvas.renderMode != RenderMode.ScreenSpaceOverlay)
+                {
+                    _uiCam = _canvas.worldCamera;
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        private void LateUpdate()
+        {
+            try
+            {
+                if (DescText == null) return;
+
+                // Prefer EventSystem raycast hover test (more robust than enter/exit flicker and rect math).
+                bool rayHover = IsPointerOverSelfHierarchy(out string topHit);
+
+                // Keep old rect-based test for evidence.
+                bool rectInside = false;
+                if (_selfRect != null)
+                {
+                    rectInside = RectTransformUtility.RectangleContainsScreenPoint(
+                        _selfRect,
+                        Input.mousePosition,
+                        _uiCam
+                    );
+                }
+
+                _lastRaycastHover = rayHover;
+
+                _lastInside = rectInside;
+
+                if (!rayHover) return;
+
+                // Keep description visible while pointer stays inside slider rect.
+                if (!DescText.gameObject.activeInHierarchy)
+                {
+                    DescText.gameObject.SetActive(true);
+                }
+
+                // Keep description visible while hovering slider region.
+                // Other UI logic may fade it out; we restore its alpha.
+                var c = DescText.color;
+                if (c.a < 0.95f)
+                {
+                    c.a = 0.95f;
+                    DescText.color = c;
+                    if ((Time.unscaledTime - _lastForcedAtUnscaled) > 0.05f)
+                    {
+                        _lastForcedAtUnscaled = Time.unscaledTime;
+                    }
+                }
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        private bool IsPointerOverSelfHierarchy(out string topHitName)
+        {
+            topHitName = "<none>";
+            try
+            {
+                if (EventSystem.current == null) return false;
+
+                var ped = new PointerEventData(EventSystem.current) { position = Input.mousePosition };
+                _raycastResults.Clear();
+                EventSystem.current.RaycastAll(ped, _raycastResults);
+
+                for (int i = 0; i < _raycastResults.Count; i++)
+                {
+                    var go = _raycastResults[i].gameObject;
+                    if (go == null) continue;
+                    if (i == 0) topHitName = go.name;
+                    if (go.transform.IsChildOf(transform)) return true;
+                }
+
+                return false;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void Forward(PointerEventData eventData, bool isEnter)
+        {
+            try
+            {
+                if (ProxyTo == null) return;
+
+                if (isEnter)
+                    ExecuteEvents.Execute(ProxyTo, eventData, ExecuteEvents.pointerEnterHandler);
+                else
+                    ExecuteEvents.Execute(ProxyTo, eventData, ExecuteEvents.pointerExitHandler);
+
+                _hovered = isEnter;
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+    }
+
+    private sealed class AgentForceSelectOnHover : MonoBehaviour, IPointerEnterHandler, IPointerDownHandler
+    {
+        public GameObject? SelectTarget;
+        public string Tag = "";
+        public bool SelectOnEnter = true;
+        public bool SelectOnDown = true;
+        private bool _pendingLateSelect;
+
+        public void OnPointerEnter(PointerEventData eventData)
+        {
+            if (SelectOnEnter)
+                ForceSelectImmediate("PointerEnter");
+        }
+
+        public void OnPointerDown(PointerEventData eventData)
+        {
+            if (SelectOnDown)
+                ForceSelectNextFrame("PointerDown");
+        }
+
+        private void ForceSelectImmediate(string evt)
+        {
+            try
+            {
+                if (SelectTarget == null || EventSystem.current == null) return;
+                if (EventSystem.current.currentSelectedGameObject == SelectTarget) return;
+                EventSystem.current.SetSelectedGameObject(SelectTarget);
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        private void ForceSelectNextFrame(string evt)
+        {
+            try
+            {
+                if (!isActiveAndEnabled) return;
+                if (_pendingLateSelect) return;
+                _pendingLateSelect = true;
+                StartCoroutine(ForceSelectNextFrameCoroutine(evt));
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        private IEnumerator ForceSelectNextFrameCoroutine(string evt)
+        {
+            yield return null;
+            try
+            {
+                if (SelectTarget == null || EventSystem.current == null) yield break;
+                if (EventSystem.current.currentSelectedGameObject == SelectTarget) yield break;
+                EventSystem.current.SetSelectedGameObject(SelectTarget);
+            }
+            catch
+            {
+                // ignore
+            }
+            finally
+            {
+                _pendingLateSelect = false;
+            }
+        }
+    }
+
 
     /// <summary>
     /// 初始化配置变量
