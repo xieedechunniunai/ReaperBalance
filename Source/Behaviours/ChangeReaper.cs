@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Linq;
+using System.Reflection;
 using GenericVariableExtension;
 using UnityEngine;
 using System.Collections.Generic;
@@ -42,7 +43,6 @@ internal sealed class ChangeReaper : MonoBehaviour
 
     private void ApplyAllChangesInternal(string reason)
     {
-        Log.Info($"应用ReaperBalance更新: {reason}");
         ForceUpdateConfig();
     }
     /// <summary>
@@ -51,20 +51,24 @@ internal sealed class ChangeReaper : MonoBehaviour
     public void ForceUpdateConfig()
     {
         if (!_isInitialized) return;
-
-        Log.Info("强制更新所有ReaperBalance配置");
-
-        // 重置配置监听值，强制更新
-        _lastCrossSlashScale = -1f;
-        _lastCollectRange = -1f;
-        _lastDamageMultiplier = -1f;
-
-        // 从AssetPool获取缓存的预制体
-        var cachedPrefab = _assetManager.GetCachedPrefab(CROSS_SLASH_PREFAB_NAME);
-        if (cachedPrefab != null)
+        // 检查 EnableCrossSlash 开关
+        if (Plugin.EnableCrossSlash.Value)
         {
-            UpdatePrefabScale(cachedPrefab);
-            UpdatePrefabDamage(cachedPrefab);
+            // 开关开启时，应用修改
+            ModifyReaperHeavy();
+            
+            // 从AssetPool获取缓存的预制体
+            var cachedPrefab = _assetManager.GetCachedPrefab(CROSS_SLASH_PREFAB_NAME);
+            if (cachedPrefab != null)
+            {
+                UpdatePrefabScale(cachedPrefab);
+                UpdatePrefabDamage(cachedPrefab);
+            }
+        }
+        else
+        {
+            // 开关关闭时，重置重攻击修改
+            ResetHeavyAttackModifiers();
         }
 
         // 更新普通攻击倍率
@@ -73,12 +77,6 @@ internal sealed class ChangeReaper : MonoBehaviour
         // 更新ReaperSilk范围
         UpdateReaperSilkRange();
 
-        _lastCrossSlashScale = Plugin.CrossSlashScale.Value;
-        _lastCollectRange = Plugin.CollectRange.Value;
-        _lastDamageMultiplier = Plugin.DamageMultiplier.Value;
-        _lastNailUpgrades = GetCurrentNailUpgrades();
-
-        Log.Info("强制配置更新完成");
     }
     #endregion
 
@@ -93,12 +91,9 @@ internal sealed class ChangeReaper : MonoBehaviour
     // 保存原始的FSM动作，用于重置
     private FsmStateAction[] _originalDoSlashActions = null;
 
-    // 响应式伤害计算相关
-    private int _lastNailUpgrades = -1;
-    // 配置监听相关
-    private float _lastCrossSlashScale = -1f;
-    private float _lastCollectRange = -1f;
-    private float _lastDamageMultiplier = -1f;
+    // 存储原始 stunDamage 值的字典（key = DamageEnemies.GetInstanceID()）
+    // 用于避免重复应用倍率时叠乘
+    private readonly Dictionary<int, float> _baseStunDamage = new Dictionary<int, float>();
     private IEnumerator Initialize()
     {
         _heroController = HeroController.instance;
@@ -120,8 +115,6 @@ internal sealed class ChangeReaper : MonoBehaviour
 
         yield return new WaitForSeconds(1);
         ModifyReaperSilk();
-        // CleanupDuplicateBundles();
-        Log.Info("ChangeReaper singleton component initialized successfully");
     }
 
     /// <summary>
@@ -135,15 +128,10 @@ internal sealed class ChangeReaper : MonoBehaviour
             var existing = _assetManager.GetCachedPrefab(CROSS_SLASH_PREFAB_NAME);
             if (existing != null)
             {
-                Log.Info("CrossSlash prefab already cached in AssetPool, skipping preload");
                 yield break;
             }
         }
 
-        Log.Info("Preloading and caching CrossSlash prefab to AssetPool...");
-
-        // 调试所有可用的资源
-        DebugAvailableAssets();
 
         // 从AssetManager获取原始预制体
         GameObject crossSlashPrefab = _assetManager.Get<GameObject>("Song Knight CrossSlash Friendly");
@@ -159,16 +147,12 @@ internal sealed class ChangeReaper : MonoBehaviour
         cachedPrefab.SetActive(false);
         cachedPrefab.transform.localScale = Vector3.one * Plugin.CrossSlashScale.Value;
 
-        // 修改预制体的DamageEnemies组件 - 确保 IsUsingNeedleDamageMult = true
-        ModifyPrefabDamageEnemiesComponents(cachedPrefab);
+        // 显式配置十字斩的 DamageEnemies 组件
+        ConfigureCrossSlashDamagers(cachedPrefab);
 
         // 存储到AssetPool（会自动设置parent并保持inactive）
         _assetManager.StorePrefabInPool(CROSS_SLASH_PREFAB_NAME, cachedPrefab);
 
-        _lastCrossSlashScale = Plugin.CrossSlashScale.Value;
-        _lastDamageMultiplier = Plugin.DamageMultiplier.Value;
-
-        Log.Info("CrossSlash prefab cached to AssetPool and modified successfully");
     }
 
     private void SpawnCrossSlash()
@@ -204,77 +188,225 @@ internal sealed class ChangeReaper : MonoBehaviour
         crossSlashInstance.transform.SetParent(null);
         crossSlashInstance.SetActive(true);
 
-        Log.Info($"Spawned Song Knight CrossSlash from AssetPool at hero position: {heroPosition}");
+        // 同步英雄 slash 01 的动态效果（NailImbuement/NailElement/毒刀/电刀）到十字斩实例
+        SyncCrossSlashDynamicFromHeroSlash01(crossSlashInstance);
 
-        // 实例已经包含了修改后的组件（包括 IsUsingNeedleDamageMult = true），无需再次修改
-        Log.Debug("CrossSlash instance spawned with pre-modified components (IsUsingNeedleDamageMult = true)");
-    }
-    /// <summary>
-    /// 响应式配置更新
-    /// </summary>
-    private void UpdateConfigIfNeeded()
-    {
-        if (!Plugin.IsReaperBalanceEnabled)
-            return;
-
-        var cachedPrefab = _assetManager?.GetCachedPrefab(CROSS_SLASH_PREFAB_NAME);
-
-        // 检查十字斩缩放大小是否变化
-        if (Plugin.CrossSlashScale.Value != _lastCrossSlashScale && cachedPrefab != null)
-        {
-            _lastCrossSlashScale = Plugin.CrossSlashScale.Value;
-            UpdatePrefabScale(cachedPrefab);
-            Log.Info($"响应式更新十字斩缩放大小: {_lastCrossSlashScale}");
-        }
-
-        // 检查伤害倍率是否变化
-        if (Plugin.DamageMultiplier.Value != _lastDamageMultiplier && cachedPrefab != null)
-        {
-            _lastDamageMultiplier = Plugin.DamageMultiplier.Value;
-            UpdatePrefabDamage(cachedPrefab);
-            Log.Info($"响应式更新伤害倍率: {_lastDamageMultiplier}");
-        }
-
-        // 检查吸收范围是否变化
-        if (Plugin.CollectRange.Value != _lastCollectRange)
-        {
-            _lastCollectRange = Plugin.CollectRange.Value;
-            UpdateReaperSilkRange();
-            Log.Info($"响应式更新吸收范围: {_lastCollectRange}");
-        }
+        // 实例已经包含了显式配置的组件（attackType=Heavy, tag=Nail Attack）+ 动态同步的 imbuement/element
     }
 
     /// <summary>
-    /// 响应式更新伤害值
+    /// 同步英雄当前的 Imbuement 效果到十字斩实例（火刀/毒刀/电刀等）
+    /// 关键：使用 HeroController.NailImbuement.CurrentImbuement 来驱动“颜色/SlashEffect”等视觉效果，
+    /// 并同步到 DamageEnemies 以确保伤害与 DOT 正确。
     /// </summary>
-    private void UpdateDamageIfNeeded()
+    private void SyncCrossSlashDynamicFromHeroSlash01(GameObject crossSlashInstance)
     {
-        if (!Plugin.IsReaperBalanceEnabled)
-            return;
-
-        int currentNailUpgrades = GetCurrentNailUpgrades();
-        if (currentNailUpgrades < 0)
-            return;
-
-        var cachedPrefab = _assetManager?.GetCachedPrefab(CROSS_SLASH_PREFAB_NAME);
-
-        // 如果nailUpgrades发生变化，更新预制体伤害
-        if (currentNailUpgrades != _lastNailUpgrades && cachedPrefab != null)
+        try
         {
-            _lastNailUpgrades = currentNailUpgrades;
-            UpdatePrefabDamage(cachedPrefab);
-            Log.Info($"响应式更新伤害值：nailUpgrades = {currentNailUpgrades}");
+            HeroController hero = HeroController.instance;
+            if (hero == null || hero.NailImbuement == null)
+            {
+                Log.Warn("Cannot sync dynamic effects: HeroController or NailImbuement not found");
+                return;
+            }
+
+            // 从 HeroController.NailImbuement 获取当前元素与配置（原版视觉 tint 由 CurrentImbuement 驱动）
+            NailElements currentElement = hero.NailImbuement.CurrentElement;
+            NailImbuementConfig imbuementConfig = hero.NailImbuement.CurrentImbuement;
+            if (imbuementConfig == null)
+            {
+                // 兜底：某些情况下 CurrentImbuement 可能为空，但仍能从元素推导（例如 Fire）
+                imbuementConfig = GetImbuementConfigForElement(currentElement);
+            }
+
+            // 同步刀光颜色与 SlashEffect（不影响 White Flash R）
+            ApplyCrossSlashImbuementVisuals(crossSlashInstance, imbuementConfig);
+
+            // 获取毒刀/电刀 ticks（检查装备状态）
+            int poisonTicks = GetPoisonTicksFromEquipment();
+            int zapTicks = GetZapTicksFromEquipment();
+
+            // 同步到 Damager1
+            Transform damager1 = crossSlashInstance.transform.Find("Damager1");
+            if (damager1 != null)
+            {
+                SyncSingleDamagerDynamicEffects(damager1.gameObject, imbuementConfig, currentElement, poisonTicks, zapTicks, "Damager1");
+            }
+
+            // 同步到 Damager2
+            Transform damager2 = crossSlashInstance.transform.Find("Damager2");
+            if (damager2 != null)
+            {
+                SyncSingleDamagerDynamicEffects(damager2.gameObject, imbuementConfig, currentElement, poisonTicks, zapTicks, "Damager2");
+            }
+        }
+        catch (System.Exception e)
+        {
+            Log.Error($"Failed to sync dynamic effects to CrossSlash: {e}");
         }
     }
 
-    private int GetCurrentNailUpgrades()
+    /// <summary>
+    /// 将 Imbuement 的视觉效果（刀光 tint、SlashEffect）应用到十字斩实例。
+    /// 仅处理：本体 + Sharp Flash / Sharp Flash (1)；不会修改 White Flash R。
+    /// </summary>
+    private static void ApplyCrossSlashImbuementVisuals(GameObject crossSlashInstance, NailImbuementConfig imbuementConfig)
     {
-        if (GameManager.instance == null || GameManager.instance.playerData == null)
+        if (crossSlashInstance == null || imbuementConfig == null)
         {
-            return -1;
+            return;
         }
 
-        return GameManager.instance.playerData.nailUpgrades;
+        try
+        {
+            // 1) 刀光 tint：本体 + 两个 Sharp Flash
+            Color tint = imbuementConfig.NailTintColor;
+            TryTintTk2dSprite(crossSlashInstance.transform, tint);
+
+            Transform sharpFlash0 = crossSlashInstance.transform.Find("Sharp Flash");
+            if (sharpFlash0 != null)
+            {
+                TryTintTk2dSprite(sharpFlash0, tint);
+            }
+
+            Transform sharpFlash1 = crossSlashInstance.transform.Find("Sharp Flash (1)");
+            if (sharpFlash1 != null)
+            {
+                TryTintTk2dSprite(sharpFlash1, tint);
+            }
+
+            // 2) SlashEffect：出刀时生成一次（不需要额外音效）
+            GameObject slashEffectPrefab = imbuementConfig.SlashEffect;
+            if (slashEffectPrefab != null)
+            {
+                GameObject fx = Instantiate(slashEffectPrefab, crossSlashInstance.transform);
+                fx.transform.localPosition = Vector3.zero;
+                fx.transform.localRotation = Quaternion.identity;
+                fx.transform.localScale = Vector3.one;
+                fx.SetActive(true);
+            }
+        }
+        catch (System.Exception e)
+        {
+            // 视觉失败不应影响伤害逻辑
+            Log.Debug($"Failed to apply CrossSlash imbuement visuals: {e.Message}");
+        }
+    }
+
+    private static void TryTintTk2dSprite(Transform target, Color tint)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        // tk2dSprite 在游戏侧存在；如果此对象没有则跳过
+        var sprite = target.GetComponent<tk2dSprite>();
+        if (sprite != null)
+        {
+            sprite.color = tint;
+        }
+    }
+
+    /// <summary>
+    /// 根据 NailElements 枚举获取对应的 NailImbuementConfig
+    /// </summary>
+    private NailImbuementConfig GetImbuementConfigForElement(NailElements element)
+    {
+        switch (element)
+        {
+            case NailElements.Fire:
+                // Effects.FireNail 是火刀的静态配置
+                return Effects.FireNail;
+            // 可以在这里添加其他元素的配置
+            // case NailElements.Ice:
+            //     return Effects.IceNail;
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>
+    /// 从装备状态获取毒刀 ticks
+    /// </summary>
+    private int GetPoisonTicksFromEquipment()
+    {
+        try
+        {
+            // 检查毒袋工具是否装备
+            if (Gameplay.PoisonPouchTool != null && Gameplay.PoisonPouchTool.Status.IsEquipped)
+            {
+                // 返回默认的毒刀 tick 数（根据游戏逻辑调整）
+                return 3; // 典型的毒伤害 tick 数
+            }
+        }
+        catch (System.Exception e)
+        {
+            Log.Debug($"Failed to check PoisonPouchTool: {e.Message}");
+        }
+        return 0;
+    }
+
+    /// <summary>
+    /// 从装备状态获取电刀 ticks
+    /// </summary>
+    private int GetZapTicksFromEquipment()
+    {
+        try
+        {
+            // 检查电刀工具是否装备
+            if (Gameplay.ZapImbuementTool != null && Gameplay.ZapImbuementTool.Status.IsEquipped)
+            {
+                // 返回默认的电刀 tick 数（根据游戏逻辑调整）
+                return 1; // 典型的电伤害 tick 数
+            }
+        }
+        catch (System.Exception e)
+        {
+            Log.Debug($"Failed to check ZapImbuementTool: {e.Message}");
+        }
+        return 0;
+    }
+
+    /// <summary>
+    /// 同步单个 damager 的动态效果
+    /// </summary>
+    private void SyncSingleDamagerDynamicEffects(
+        GameObject damagerObject, 
+        NailImbuementConfig nailImbuement, 
+        NailElements nailElement,
+        int poisonTicks,
+        int zapTicks,
+        string damagerName)
+    {
+        DamageEnemies targetDamager = damagerObject.GetComponent<DamageEnemies>();
+        if (targetDamager == null)
+        {
+            Log.Warn($"DamageEnemies component not found on {damagerName} for dynamic sync");
+            return;
+        }
+
+        // 同步 NailImbuement 和 NailElement（公开属性，可直接设置）
+        targetDamager.NailImbuement = nailImbuement;
+        targetDamager.NailElement = nailElement;
+
+        // 同步毒刀 ticks（使用公开方法）
+        if (poisonTicks > 0)
+        {
+            targetDamager.OverridePoisonDamage(poisonTicks);
+        }
+
+        // 同步电刀 ticks（需要反射设置私有字段）
+        if (zapTicks > 0)
+        {
+            var damagerType = typeof(DamageEnemies);
+            var zapTicksField = damagerType.GetField("zapDamageTicks", 
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            if (zapTicksField != null)
+            {
+                zapTicksField.SetValue(targetDamager, zapTicks);
+            }
+        }
     }
     /// <summary>
     /// 更新预制体缩放大小
@@ -284,7 +416,6 @@ internal sealed class ChangeReaper : MonoBehaviour
         if (prefab != null)
         {
             prefab.transform.localScale = Vector3.one * Plugin.CrossSlashScale.Value;
-            Log.Info($"更新预制体缩放大小: {Plugin.CrossSlashScale.Value}");
         }
     }
 
@@ -306,6 +437,8 @@ internal sealed class ChangeReaper : MonoBehaviour
             if (modifier != null)
             {
                 modifier.CollectRange = Plugin.CollectRange.Value;
+                modifier.CollectMaxSpeed = Plugin.CollectMaxSpeed.Value;
+                modifier.CollectAcceleration = Plugin.CollectAcceleration.Value;
             }
         }
 
@@ -331,32 +464,21 @@ internal sealed class ChangeReaper : MonoBehaviour
             if (modifier != null)
             {
                 modifier.CollectRange = Plugin.CollectRange.Value;
+                modifier.CollectMaxSpeed = Plugin.CollectMaxSpeed.Value;
+                modifier.CollectAcceleration = Plugin.CollectAcceleration.Value;
                 updatedCount++;
             }
         }
     }
     /// <summary>
-    /// 更新预制体伤害值
+    /// 更新预制体伤害值 - 重新配置十字斩 DamageEnemies 组件
     /// </summary>
     private void UpdatePrefabDamage(GameObject prefab)
     {
         try
         {
-            // 查找Damager1和Damager2子对象
-            Transform damager1 = prefab.transform.Find("Damager1");
-            Transform damager2 = prefab.transform.Find("Damager2");
-
-            if (damager1 != null)
-            {
-                UpdateSingleDamage(damager1.gameObject, "Damager1");
-            }
-
-            if (damager2 != null)
-            {
-                UpdateSingleDamage(damager2.gameObject, "Damager2");
-            }
-
-            Log.Info("响应式伤害更新完成");
+            // 重新配置十字斩（主要是更新 nailDamageMultiplier 和其他配置）
+            ConfigureCrossSlashDamagers(prefab);
         }
         catch (System.Exception e)
         {
@@ -376,18 +498,14 @@ internal sealed class ChangeReaper : MonoBehaviour
         // 通常：localScale.x > 0 表示朝右，localScale.x < 0 表示朝左
         float heroScaleX = heroTransform.localScale.x;
 
-        Log.Info($"Hero localScale: {heroTransform.localScale}, scaleX: {heroScaleX}");
-
         if (heroScaleX < 0) // 英雄朝右
         {
-            Log.Info("Hero facing right, rotating CrossSlash to face right");
             // 英雄朝右时，让CrossSlash也朝右
             // 通常需要绕Y轴旋转180度来面向右侧
             return Quaternion.Euler(0, 180, 0);
         }
         else if (heroScaleX > 0) // 英雄朝左
         {
-            Log.Info("Hero facing left, using default rotation (facing left)");
             // 英雄朝左时，使用默认朝向（通常是朝左）
             return Quaternion.identity;
         }
@@ -398,112 +516,6 @@ internal sealed class ChangeReaper : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// 修改预制体中的DamageEnemies组件（在实例化之前）
-    /// </summary>
-    private void ModifyPrefabDamageEnemiesComponents(GameObject prefab)
-    {
-        try
-        {
-            // 查找Damager1和Damager2子对象
-            Transform damager1 = prefab.transform.Find("Damager1");
-            Transform damager2 = prefab.transform.Find("Damager2");
-
-            if (damager1 != null)
-            {
-                ModifySingleDamageEnemies(damager1.gameObject, "Damager1");
-            }
-            else
-            {
-                Log.Warn("Damager1 child object not found in CrossSlash prefab");
-            }
-
-            if (damager2 != null)
-            {
-                ModifySingleDamageEnemies(damager2.gameObject, "Damager2");
-            }
-            else
-            {
-                Log.Warn("Damager2 child object not found in CrossSlash prefab");
-            }
-
-            Log.Info("Successfully modified DamageEnemies components in prefab");
-        }
-        catch (System.Exception e)
-        {
-            Log.Error($"Failed to modify DamageEnemies components in prefab: {e}");
-        }
-    }
-
-    /// <summary>
-    /// 修改单个GameObject中的DamageEnemies组件
-    /// 关键：确保 hitInstance.IsUsingNeedleDamageMult = true
-    /// </summary>
-    private void ModifySingleDamageEnemies(GameObject damagerObject, string damagerName)
-    {
-        // 获取DamageEnemies组件
-        var damageEnemies = damagerObject.GetComponent<DamageEnemies>();
-        if (damageEnemies == null)
-        {
-            Log.Warn($"DamageEnemies component not found on {damagerName}");
-            return;
-        }
-
-        // 关键设置：确保 IsUsingNeedleDamageMult = true
-        // 在 DamageEnemies.DoDamage() 中: IsUsingNeedleDamageMult = (this.useNailDamage || this.useHeroDamageAffectors)
-        damageEnemies.useNailDamage = true;           // 启用钉子伤害计算
-        damageEnemies.useHeroDamageAffectors = true;  // 启用英雄伤害影响因子
-        damageEnemies.isHeroDamage = true;            // 标记为英雄伤害
-        Log.Info($"Enabled useNailDamage + useHeroDamageAffectors on {damagerName} (IsUsingNeedleDamageMult = true)");
-
-        // 修改damageAsset的IntReference.Value
-        if (damageEnemies.damageAsset != null)
-        {
-            // 计算伤害值：12 + nailUpgrades * 9
-            int nailUpgrades = 0;
-            if (GameManager.instance != null && GameManager.instance.playerData != null)
-            {
-                nailUpgrades = GameManager.instance.playerData.nailUpgrades;
-            }
-
-            int calculatedDamage = 12 + nailUpgrades * 9;
-
-            // 直接设置value字段
-            damageEnemies.damageAsset.value = calculatedDamage;
-            Log.Info($"Set {damagerName} damage to {calculatedDamage} (nailUpgrades: {nailUpgrades})");
-        }
-        else
-        {
-            Log.Warn($"damageAsset is null on {damagerName}");
-        }
-
-        // 修改attackType为Nail
-        damageEnemies.attackType = AttackTypes.Nail;
-        Log.Info($"Set {damagerName} attackType to Nail");
-    }
-    /// <summary>
-    /// 更新单个GameObject的伤害值
-    /// </summary>
-    private void UpdateSingleDamage(GameObject damagerObject, string damagerName)
-    {
-        var damageEnemies = damagerObject.GetComponent<DamageEnemies>();
-        if (damageEnemies == null || damageEnemies.damageAsset == null)
-            return;
-
-        // 计算伤害值：12 + nailUpgrades * 9
-        int nailUpgrades = 0;
-        if (GameManager.instance != null && GameManager.instance.playerData != null)
-        {
-
-            nailUpgrades = GameManager.instance.playerData.nailUpgrades;
-        }
-
-        float baseDamage = 12f + (float)nailUpgrades * 9f;
-        float calculatedDamage = baseDamage * Plugin.DamageMultiplier.Value; // 使用配置值
-                                                                             // 修复：同时更新damageAsset.value和damageDealt
-        damageEnemies.damageAsset.value = Mathf.RoundToInt(calculatedDamage);
-        damageEnemies.damageDealt = Mathf.RoundToInt(calculatedDamage);
-    }
     /// <summary>
     /// Check if the ChangeReaper component is initialized.
     /// </summary>
@@ -521,23 +533,111 @@ internal sealed class ChangeReaper : MonoBehaviour
         return _assetManager.IsPrefabCached(CROSS_SLASH_PREFAB_NAME);
     }
 
-    private void DebugAvailableAssets()
+    /// <summary>
+    /// 显式配置十字斩的 DamageEnemies 组件（不再从英雄反射复制）
+    /// </summary>
+    private void ConfigureCrossSlashDamagers(GameObject crossSlashPrefabOrInstance)
     {
-        Log.Info("=== Available Assets ===");
-        var allAssetNames = _assetManager.GetAllAssetNames();
-        foreach (var assetName in allAssetNames)
+        try
         {
-            Log.Info($"Asset: {assetName}");
-
-            // 尝试获取这个资源来检查类型
-            var asset = _assetManager.Get<Object>(assetName);
-            if (asset != null)
+            // 处理 Damager1
+            Transform damager1 = crossSlashPrefabOrInstance.transform.Find("Damager1");
+            if (damager1 != null)
             {
-                Log.Info($"  Type: {asset.GetType().Name}, Name: {asset.name}");
+                ConfigureSingleCrossSlashDamager(damager1.gameObject, "Damager1");
             }
+            else
+            {
+                Log.Warn("Damager1 not found in CrossSlash");
+            }
+
+            // 处理 Damager2
+            Transform damager2 = crossSlashPrefabOrInstance.transform.Find("Damager2");
+            if (damager2 != null)
+            {
+                ConfigureSingleCrossSlashDamager(damager2.gameObject, "Damager2");
+            }
+            else
+            {
+                Log.Warn("Damager2 not found in CrossSlash");
+            }
+
+            Log.Info("Successfully configured CrossSlash damagers with explicit settings");
         }
-        Log.Info("=== End of Available Assets ===");
+        catch (System.Exception e)
+        {
+            Log.Error($"Failed to configure CrossSlash damagers: {e}");
+        }
     }
+
+    /// <summary>
+    /// 配置单个十字斩 DamageEnemies 组件
+    /// 仅配置 nailDamageMultiplier
+    /// </summary>
+    private void ConfigureSingleCrossSlashDamager(GameObject damagerObject, string damagerName)
+    {
+        DamageEnemies targetDamager = damagerObject.GetComponent<DamageEnemies>();
+        if (targetDamager == null)
+        {
+            Log.Warn($"DamageEnemies component not found on {damagerName}");
+            return;
+        }
+
+        // 设置 GameObject tag 为 "Nail Attack"（保证 Heavy 同时被当作 nail hit）
+        damagerObject.tag = "Nail Attack";
+
+        // 显式设置公开属性
+        targetDamager.useNailDamage = true;
+        targetDamager.nailDamageMultiplier = Plugin.CrossSlashDamage.Value;
+        targetDamager.attackType = AttackTypes.Heavy;
+        
+        // 十字斩基础 stunDamage 为 1，乘以配置的倍率
+        float baseStunDamage = 1f;
+        targetDamager.stunDamage = baseStunDamage * Plugin.StunDamageMultiplier.Value;
+        targetDamager.canWeakHit = false;
+        targetDamager.magnitudeMult = 1f;
+        targetDamager.direction = 0f;
+        targetDamager.moveDirection = false;
+
+        // 使用反射设置私有字段
+        var damagerType = typeof(DamageEnemies);
+
+        // 设置 silkGeneration 为 Full (HitSilkGeneration.Full = 0)
+        var silkGenerationField = damagerType.GetField("silkGeneration", 
+            BindingFlags.NonPublic | BindingFlags.Instance);
+        if (silkGenerationField != null)
+        {
+            // HitSilkGeneration.Full = 0
+            silkGenerationField.SetValue(targetDamager, 0);
+        }
+        
+        // 设置 directionSourceOverride 为 CircleDirection (1)
+        var directionSourceOverrideField = damagerType.GetField("directionSourceOverride", 
+            BindingFlags.NonPublic | BindingFlags.Instance);
+        if (directionSourceOverrideField != null)
+        {
+            // DirectionSourceOverrides.CircleDirection = 1
+            directionSourceOverrideField.SetValue(targetDamager, 1);
+        }
+        
+        // 设置 isHeroDamage 为 true
+        var isHeroDamageField = damagerType.GetField("isHeroDamage", 
+            BindingFlags.NonPublic | BindingFlags.Instance);
+        if (isHeroDamageField != null)
+        {
+            isHeroDamageField.SetValue(targetDamager, true);
+        }
+        
+        // 设置 ignoreInvuln 为 false
+        var ignoreInvulnField = damagerType.GetField("ignoreInvuln", 
+            BindingFlags.NonPublic | BindingFlags.Instance);
+        if (ignoreInvulnField != null)
+        {
+            ignoreInvulnField.SetValue(targetDamager, false);
+        }
+
+    }
+
     #endregion
     #region modifyReaperHeavyAttack
     /// <summary>
@@ -548,9 +648,15 @@ internal sealed class ChangeReaper : MonoBehaviour
         // 添加全局开关检查
         if (!Plugin.IsReaperBalanceEnabled)
         {
-            Log.Info("全局开关关闭，跳过HeavyAttack修改");
             return;
         }
+        
+        // 检查 EnableCrossSlash 开关
+        if (!Plugin.EnableCrossSlash.Value)
+        {
+            return;
+        }
+        
         if (_heroController == null)
         {
             Log.Error("HeroController is null! Cannot modify FSM.");
@@ -573,7 +679,6 @@ internal sealed class ChangeReaper : MonoBehaviour
             var doSlashState = nailArtsFSM.FsmStates.FirstOrDefault(s => s.Name == "Do Slash");
             if (doSlashState != null)
             {
-                Log.Info("找到Do Slash状态 - 这很可能是真正的攻击释放点");
                 // 保存原始动作（仅在首次修改时保存）
                 if (_originalDoSlashActions == null)
                 {
@@ -695,7 +800,11 @@ internal sealed class ChangeReaper : MonoBehaviour
                     if (damageEnemies != null)
                     {
                         damageEnemies.damageMultiplier = Plugin.DownSlashMultiplier.Value;
-                        Log.Info($"修改 {DownSlash.name} 的DamageEnemies.damageMultiplier为 {damageEnemies.damageMultiplier}");
+                        
+                        // 应用眩晕值倍率
+                        ApplyStunDamageMultiplier(damageEnemies, DownSlash.name);
+                        
+                        Log.Info($"修改 {DownSlash.name} 的DamageEnemies: damageMultiplier={damageEnemies.damageMultiplier}, stunDamage={damageEnemies.stunDamage}");
                     }
                     else
                     {
@@ -719,10 +828,10 @@ internal sealed class ChangeReaper : MonoBehaviour
         }
     }
     /// <summary>
-    /// 递归修改Transform及其所有子物体的DamageEnemies组件的damageMultiplier值
+    /// 递归修改Transform及其所有子物体的DamageEnemies组件的damageMultiplier和stunDamage值
     /// </summary>
     /// <param name="transform">要处理的Transform</param>
-    /// <param name="multiplier">要设置的乘数值</param>
+    /// <param name="multiplier">要设置的伤害乘数值</param>
     private void ModifyDamageMultiplierRecursive(Transform transform, float multiplier)
     {
         // 修改当前对象的DamageEnemies组件
@@ -730,13 +839,49 @@ internal sealed class ChangeReaper : MonoBehaviour
         if (damageEnemies != null && transform.name != "DownSlash New")
         {
             damageEnemies.damageMultiplier = multiplier;
-            Log.Info($"修改 {transform.name} 的DamageEnemies.damageMultiplier为 {multiplier}");
+            
+            // 应用眩晕值倍率（避免叠乘：使用缓存的基础值）
+            ApplyStunDamageMultiplier(damageEnemies, transform.name);
+            
+            Log.Info($"修改 {transform.name} 的DamageEnemies.damageMultiplier为 {multiplier}, stunDamage为 {damageEnemies.stunDamage}");
         }
 
         // 递归处理所有子物体
         foreach (Transform child in transform)
         {
             ModifyDamageMultiplierRecursive(child, multiplier);
+        }
+    }
+
+    /// <summary>
+    /// 应用眩晕值倍率到指定的 DamageEnemies 组件
+    /// 使用缓存的基础值避免重复应用时叠乘
+    /// </summary>
+    private void ApplyStunDamageMultiplier(DamageEnemies damageEnemies, string objectName)
+    {
+        int instanceId = damageEnemies.GetInstanceID();
+        
+        // 如果没有缓存过基础值，先记录当前值作为基础值
+        if (!_baseStunDamage.ContainsKey(instanceId))
+        {
+            _baseStunDamage[instanceId] = damageEnemies.stunDamage;
+            Log.Debug($"记录 {objectName} 的基础 stunDamage: {damageEnemies.stunDamage}");
+        }
+        
+        // 使用基础值乘以倍率
+        float baseValue = _baseStunDamage[instanceId];
+        damageEnemies.stunDamage = baseValue * Plugin.StunDamageMultiplier.Value;
+    }
+
+    /// <summary>
+    /// 重置指定 DamageEnemies 组件的 stunDamage 为基础值
+    /// </summary>
+    private void ResetStunDamageToBase(DamageEnemies damageEnemies)
+    {
+        int instanceId = damageEnemies.GetInstanceID();
+        if (_baseStunDamage.TryGetValue(instanceId, out float baseValue))
+        {
+            damageEnemies.stunDamage = baseValue;
         }
     }
     #endregion
@@ -772,6 +917,8 @@ internal sealed class ChangeReaper : MonoBehaviour
             modifier = ReaperSilkBundle.AddComponent<ReaperSilkRangeModifier>();
         }
         modifier.CollectRange = Plugin.CollectRange.Value;
+        modifier.CollectMaxSpeed = Plugin.CollectMaxSpeed.Value;
+        modifier.CollectAcceleration = Plugin.CollectAcceleration.Value;
 
         Log.Info("已为Reaper Silk Bundle添加范围修改组件");
 
@@ -804,12 +951,16 @@ internal sealed class ChangeReaper : MonoBehaviour
                 // 添加组件
                 var modifier = bundle.AddComponent<ReaperSilkRangeModifier>();
                 modifier.CollectRange = Plugin.CollectRange.Value;
+                modifier.CollectMaxSpeed = Plugin.CollectMaxSpeed.Value;
+                modifier.CollectAcceleration = Plugin.CollectAcceleration.Value;
                 modifiedCount++;
                 Log.Info($"为实例 {bundle.name} 添加范围修改组件");
             }
             else
             { // 修复：即使已有组件，也要更新范围值
                 existingModifier.CollectRange = Plugin.CollectRange.Value;
+                existingModifier.CollectMaxSpeed = Plugin.CollectMaxSpeed.Value;
+                existingModifier.CollectAcceleration = Plugin.CollectAcceleration.Value;
                 modifiedCount++;
                 Log.Info($"实例 {bundle.name} 已有范围修改组件");
             }
@@ -822,6 +973,8 @@ internal sealed class ChangeReaper : MonoBehaviour
     private class ReaperSilkRangeModifier : MonoBehaviour
     {
         public float CollectRange = 8f;
+        public float CollectMaxSpeed = 20f;
+        public float CollectAcceleration = 800f;
         private bool _isModified = false;
         private RangeCollectAction _rangeAction = null;
 
@@ -842,6 +995,8 @@ internal sealed class ChangeReaper : MonoBehaviour
             {
                 // 修复：动态更新RangeCollectAction中的范围值
                 _rangeAction.CollectRange = CollectRange;
+                _rangeAction.MaxSpeed = CollectMaxSpeed;
+                _rangeAction.Acceleration = CollectAcceleration;
             }
         }
 
@@ -869,7 +1024,9 @@ internal sealed class ChangeReaper : MonoBehaviour
                 {
                     Owner = gameObject,
                     Fsm = fsm,
-                    CollectRange = CollectRange
+                    CollectRange = CollectRange,
+                    MaxSpeed = CollectMaxSpeed,
+                    Acceleration = CollectAcceleration
                 };
 
                 actionsList.Add(_rangeAction);
@@ -885,6 +1042,8 @@ internal sealed class ChangeReaper : MonoBehaviour
                 {
                     _rangeAction = existingAction;
                     _rangeAction.CollectRange = CollectRange;
+                    _rangeAction.MaxSpeed = CollectMaxSpeed;
+                    _rangeAction.Acceleration = CollectAcceleration;
                     _isModified = true;
                     Log.Info($"更新现有范围检测动作，范围: {CollectRange}");
                 }
@@ -898,14 +1057,14 @@ internal sealed class ChangeReaper : MonoBehaviour
         public GameObject Owner { get; set; }
         public PlayMakerFSM Fsm { get; set; }
         public float CollectRange { get; set; } = 8f;
+        public float MaxSpeed { get; set; } = 20f;
+        public float Acceleration { get; set; } = 800f;
 
         private GameObject _hero;
         private Rigidbody2D _rb;
         private bool _isInRange = false;
         private float _checkInterval = 0.1f;
         private float _lastCheckTime = 0f;
-        private float _maxSpeed = 20f;
-        private float _acceleration = 800f;
 
         public override void OnEnter()
         {
@@ -936,6 +1095,18 @@ internal sealed class ChangeReaper : MonoBehaviour
                 return;
             }
 
+            // 检查 EnableSilkAttraction 开关
+            if (!Plugin.EnableSilkAttraction.Value)
+            {
+                // 开关关闭时，停止吸引效果
+                if (_isInRange && _rb.linearVelocity.magnitude > 0.1f)
+                {
+                    _rb.linearVelocity = Vector2.zero;
+                    _isInRange = false;
+                }
+                return;
+            }
+
             // 限制检测频率
             if (Time.time - _lastCheckTime < _checkInterval)
                 return;
@@ -962,13 +1133,13 @@ internal sealed class ChangeReaper : MonoBehaviour
                     Vector2 currentVelocity = _rb.linearVelocity;
 
                     // 计算目标速度
-                    Vector2 targetVelocity = direction * _maxSpeed;
+                    Vector2 targetVelocity = direction * MaxSpeed;
 
                     // 计算需要的速度变化
                     Vector2 velocityChange = targetVelocity - currentVelocity;
 
                     // 限制加速度，确保不超过最大加速度
-                    float maxAcceleration = _acceleration * Time.deltaTime;
+                    float maxAcceleration = Acceleration * Time.deltaTime;
                     if (velocityChange.magnitude > maxAcceleration)
                     {
                         velocityChange = velocityChange.normalized * maxAcceleration;
@@ -978,9 +1149,9 @@ internal sealed class ChangeReaper : MonoBehaviour
                     _rb.linearVelocity += velocityChange;
 
                     // 限制最大速度
-                    if (_rb.linearVelocity.magnitude > _maxSpeed)
+                    if (_rb.linearVelocity.magnitude > MaxSpeed)
                     {
-                        _rb.linearVelocity = _rb.linearVelocity.normalized * _maxSpeed;
+                        _rb.linearVelocity = _rb.linearVelocity.normalized * MaxSpeed;
                     }
 
 
@@ -1037,6 +1208,10 @@ internal sealed class ChangeReaper : MonoBehaviour
             // 重置其他修改
             ResetHeavyAttackModifiers();
             ResetReaperSilk();
+            
+            // 清空 stunDamage 基础值缓存
+            _baseStunDamage.Clear();
+            
             Log.Info("已重置所有Reaper修改");
         }
         catch (System.Exception e)
@@ -1068,7 +1243,11 @@ internal sealed class ChangeReaper : MonoBehaviour
         if (damageEnemies != null)
         {
             damageEnemies.damageMultiplier = multiplier;
-            Log.Info($"重置 {transform.name} 的DamageEnemies.damageMultiplier为 {multiplier}");
+            
+            // 重置 stunDamage 为基础值
+            ResetStunDamageToBase(damageEnemies);
+            
+            Log.Info($"重置 {transform.name} 的DamageEnemies: damageMultiplier={multiplier}, stunDamage={damageEnemies.stunDamage}");
         }
 
         // 递归处理所有子物体

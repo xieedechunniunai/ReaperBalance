@@ -1,6 +1,7 @@
 using HarmonyLib;
 using GlobalSettings;
 using ReaperBalance.Source;
+using UnityEngine;
 
 namespace ReaperBalance.Source.Patches
 {
@@ -9,7 +10,7 @@ namespace ReaperBalance.Source.Patches
     /// </summary>
     [HarmonyPatch(typeof(HeroController))]
     [HarmonyPatch("BindCompleted")]
-    internal static class HeroControllerPatch
+    internal static class HeroControllerBindCompletedPatch
     {
         /// <summary>
         /// 后置补丁：在BindCompleted方法执行后修改Reaper模式持续时间
@@ -65,6 +66,48 @@ namespace ReaperBalance.Source.Patches
             catch (System.Exception e)
             {
                 Log.Error($"修改Reaper模式持续时间时出错：{e}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Harmony补丁：修改HeroController的GetReaperPayout方法，实现Reaper bundle倍率
+    /// </summary>
+    [HarmonyPatch(typeof(HeroController))]
+    [HarmonyPatch("GetReaperPayout")]
+    internal static class HeroControllerGetReaperPayoutPatch
+    {
+        /// <summary>
+        /// 后置补丁：将 GetReaperPayout 的返回值乘以配置的倍率
+        /// </summary>
+        [HarmonyPostfix]
+        private static void Postfix(ref int __result)
+        {
+            // 检查是否启用Reaper平衡修改
+            if (!Plugin.ShouldApplyPatches() || !Gameplay.ReaperCrest.IsEquipped)
+            {
+                return;
+            }
+
+            try
+            {
+                int originalResult = __result;
+                
+                // 应用倍率
+                float multipliedResult = originalResult * Plugin.ReaperBundleMultiplier.Value;
+                
+                // 四舍五入到整数，并确保最小值为 1（避免倍率 < 1 时掉到 0）
+                __result = Mathf.Max(1, Mathf.RoundToInt(multipliedResult));
+                
+                // 仅在倍率不为 1 时记录日志（减少日志噪音）
+                if (Plugin.ReaperBundleMultiplier.Value != 1f)
+                {
+                    Log.Debug($"Reaper bundle payout: {originalResult} -> {__result} (multiplier: {Plugin.ReaperBundleMultiplier.Value})");
+                }
+            }
+            catch (System.Exception e)
+            {
+                Log.Error($"修改Reaper bundle payout时出错：{e}");
             }
         }
     }

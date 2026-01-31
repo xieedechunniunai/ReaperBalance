@@ -75,14 +75,19 @@ Source/
 
 ## 配置选项
 
-在游戏内按F1打开配置界面，或编辑`BepInEx/config`目录下的配置文件：
+在游戏内通过 Mod Options 菜单配置，或编辑`BepInEx/config`目录下的配置文件：
 
-- `EnableReaperBalance`: 全局启用/禁用开关
+- `EnableReaperBalance`: 全局启用/禁用开关 (默认: true)
+- `UseChinese`: 是否使用中文菜单 (默认: true)
+- `EnableCrossSlash`: 是否启用十字斩 (默认: true)
+- `EnableSilkAttraction`: 是否吸引小丝球 (默认: true)
 - `CrossSlashScale`: 十字斩击缩放大小 (默认: 1.2)
-- `DamageMultiplier`: 十字斩伤害倍率 (默认: 1.0)
+- `CrossSlashDamage`: 十字斩伤害倍率 (默认: 2.3)
 - `NormalAttackMultiplier`: 普通攻击倍率 (默认: 1.2)
 - `DownSlashMultiplier`: 下劈攻击倍率 (默认: 1.5)
-- `CollectRange`: 灵魂吸收范围 (默认: 8)
+- `CollectRange`: 吸引范围 (默认: 8)
+- `CollectMaxSpeed`: 吸引最大速度 (默认: 20)
+- `CollectAcceleration`: 吸引加速度 (默认: 800)
 - `DurationMultiplier`: 持续时间倍率 (默认: 3.0)
 
 ## 技术特点
@@ -180,14 +185,19 @@ Source/
 
 ## Configuration Options
 
-Press F1 in-game to open configuration interface, or edit configuration files in `BepInEx/config` directory:
+Configure through the in-game Mod Options menu, or edit configuration files in `BepInEx/config` directory:
 
-- `EnableReaperBalance`: Global enable/disable toggle
+- `EnableReaperBalance`: Global enable/disable toggle (Default: true)
+- `UseChinese`: Use Chinese menu language (Default: true)
+- `EnableCrossSlash`: Enable Cross Slash (Default: true)
+- `EnableSilkAttraction`: Enable silk orb attraction (Default: true)
 - `CrossSlashScale`: Cross slash scaling size (Default: 1.2)
-- `DamageMultiplier`: Cross slash damage multiplier (Default: 1.0)
+- `CrossSlashDamage`: Cross slash damage multiplier (Default: 2.3)
 - `NormalAttackMultiplier`: Normal attack multiplier (Default: 1.2)
 - `DownSlashMultiplier`: Down slash multiplier (Default: 1.5)
-- `CollectRange`: Soul absorption range (Default: 8)
+- `CollectRange`: Attraction range (Default: 8)
+- `CollectMaxSpeed`: Max attraction speed (Default: 20)
+- `CollectAcceleration`: Attraction acceleration (Default: 800)
 - `DurationMultiplier`: Duration multiplier (Default: 3.0)
 
 ## Technical Features

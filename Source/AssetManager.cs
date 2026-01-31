@@ -81,7 +81,6 @@ internal sealed class AssetManager : MonoBehaviour
         _assetPool = new GameObject("AssetPool");
         _assetPool.transform.SetParent(transform);
         _assetPool.SetActive(false);
-        Log.Info("Created AssetPool");
     }
 
     /// <summary>
@@ -105,7 +104,6 @@ internal sealed class AssetManager : MonoBehaviour
         _cachedPrefabs.Clear();
         _loadedAssets.Clear();
         _initialized = false;
-        Log.Info($"Cleaned up {count} objects from AssetPool");
     }
 
     /// <summary>
@@ -118,7 +116,6 @@ internal sealed class AssetManager : MonoBehaviour
         prefab.transform.SetParent(_assetPool.transform);
         prefab.SetActive(false);
         _cachedPrefabs[name] = prefab;
-        Log.Info($"Stored prefab '{name}' in AssetPool");
     }
 
     /// <summary>
@@ -189,7 +186,6 @@ internal sealed class AssetManager : MonoBehaviour
                             if (asset != null && !_loadedAssets.ContainsKey(required))
                             {
                                 _loadedAssets[required] = asset;
-                                Log.Info($"Loaded asset: {required}");
                             }
                             break;
                         }
