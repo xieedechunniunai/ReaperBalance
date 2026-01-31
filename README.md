@@ -1,220 +1,220 @@
-# ReaperBalance - Reaper护符平衡性修改模组
+# ReaperBalance - 收割者纹章增强模组
 
 [English Version](#english-version)
 
-## 项目概述
+## 模组简介
 
-ReaperBalance是一个针对Silksong游戏的Reaper护符平衡性修改模组，通过Harmony补丁和Unity组件系统动态修改游戏中的Reaper护符相关功能，提供可配置的平衡性调整选项。
+ReaperBalance 是一款针对 Silksong 收割者纹章（Reaper Crest）的增强模组。装备收割者纹章后，你将获得更强大的战斗能力和更流畅的游戏体验。所有功能都可以通过游戏内菜单自由配置。
 
-## 功能特性
+## 主要功能
 
-### 🎯 核心功能
-- **全局开关控制** - 可随时启用/禁用所有平衡性修改
-- **响应式配置更新** - 配置修改实时生效，无需重启游戏
-- **护符装备检测** - 仅在装备Reaper护符时应用修改
+### 战斗增强
+- **十字斩蓄力攻击** - 蓄力后释放强力的十字形斩击，可调整大小和伤害
+- **攻击伤害提升** - 普通攻击和下劈攻击的伤害倍率可独立调整
+- **眩晕值加成** - 所有攻击的眩晕效果更强，更容易打断敌人
 
-### ⚔️ 战斗平衡调整
-- **十字斩击修改**
-  - 可配置的伤害倍率调整
-  - 自定义攻击缩放大小
-  - 基于钉子升级的动态伤害计算
-- **普通攻击增强** - 可配置的普通攻击伤害倍率
-- **下劈攻击强化** - 独立的下劈攻击伤害倍率
+### 收割模式优化
+- **持续时间延长** - 收割者模式持续时间大幅提升
+- **丝球掉落增加** - 攻击敌人时掉落更多丝球
+- **丝球自动吸引** - 远距离自动吸引小丝球，可调整范围和速度
 
-### 🔮 灵魂系统优化
-- **灵魂吸收范围扩展** - 可配置的灵魂吸收检测范围
-- **Reaper模式持续时间** - 延长Reaper模式的持续时间
+### 暴击系统（可选）
+- **独享暴击机制** - 启用后，收割者纹章拥有独立的暴击系统
+- **可配置暴击率** - 自定义暴击概率（0-100%）
+- **可配置暴击伤害** - 自定义暴击伤害倍率
 
-### 🎮 用户体验
-- **可视化配置界面** - 游戏内GUI配置面板
-- **中英文支持** - 完整的本地化界面
-- **实时日志输出** - 详细的调试信息
+## 安装方法
+
+### 前置依赖
+- [BepInEx](https://github.com/BepInEx/BepInEx) - 模组加载框架
+- [ModMenu](https://thunderstore.io/c/hollow-knight-silksong/p/silksong_modding/ModMenu/) - 游戏内配置菜单（[GitHub](https://github.com/silksong-modding/Silksong.ModMenu)）
+
+### 安装步骤
+1. 安装 BepInEx 框架
+2. 安装 ModMenu 模组
+3. 将 `ReaperBalance.dll` 放入 `BepInEx/plugins` 目录
+4. 启动游戏即可
+
+## 配置说明
+
+在游戏内通过 **Mod Options** 菜单配置（支持中英文切换），或编辑 `BepInEx/config/ReaperBalance.cfg` 文件。
+
+### 通用设置
+| 配置项 | 说明 | 默认值 |
+|--------|------|--------|
+| EnableReaperBalance | 全局启用/禁用开关 | true |
+| UseChinese | 使用中文菜单 | true |
+
+### 攻击设置
+| 配置项 | 说明 | 默认值 |
+|--------|------|--------|
+| EnableCrossSlash | 启用十字斩蓄力攻击 | true |
+| CrossSlashScale | 十字斩缩放大小 | 1.2 |
+| CrossSlashDamage | 十字斩伤害倍率 | 2.3 |
+| NormalAttackMultiplier | 普通攻击伤害倍率 | 1.2 |
+| DownSlashMultiplier | 下劈攻击伤害倍率 | 1.5 |
+| StunDamageMultiplier | 眩晕值倍率 | 1.2 |
+
+### 收割模式设置
+| 配置项 | 说明 | 默认值 |
+|--------|------|--------|
+| DurationMultiplier | 收割者模式持续时间倍率 | 3.0 |
+| ReaperBundleMultiplier | 丝球掉落倍率 | 1.0 |
+
+### 丝球吸引设置
+| 配置项 | 说明 | 默认值 |
+|--------|------|--------|
+| EnableSilkAttraction | 启用丝球吸引 | true |
+| CollectRange | 吸引范围 | 8 |
+| CollectMaxSpeed | 吸引最大速度 | 20 |
+| CollectAcceleration | 吸引加速度 | 800 |
+
+### 暴击设置
+| 配置项 | 说明 | 默认值 |
+|--------|------|--------|
+| EnableReaperCrit | 启用收割者暴击系统 | false |
+| ReaperCritChancePercent | 暴击率（%） | 10 |
+| ReaperCritDamageMultiplier | 暴击伤害倍率 | 3.0 |
+
+---
+
+# 开发者文档
 
 ## 项目结构
-Source/ 
-├── Plugin.cs # 主插件入口，配置管理和Harmony补丁 
-├── AssetManager.cs # 资源管理器，负责预制体加载 
-├── Log.cs # 日志系统 
-├── Behaviours/ 
-│ ├── ChangeReaper.cs # 核心功能组件，处理所有Reaper修改 
-│ └── ConfigGUI.cs # 配置界面实现 
-└── Patches/ 
-└── HeroControllerPatch.cs # Harmony补丁，修改HeroController行为
 
-## 核心模块详解
+```
+Source/
+├── Plugin.cs                    # 主插件入口，配置管理
+├── AssetManager.cs              # 资源管理器，预制体加载缓存
+├── Log.cs                       # 日志系统
+├── Behaviours/
+│   └── ChangeReaper.cs          # 核心功能组件
+├── ModMenu/
+│   └── ReaperBalancePaginatedMenuScreen.cs  # 分页菜单界面
+└── Patches/
+    ├── HeroControllerPatch.cs   # HeroController 补丁
+    └── HealthManagerCritPatch.cs # 暴击系统补丁
+```
 
-### 1. Plugin.cs - 主插件模块
-- **功能**: 插件入口点，配置初始化，Harmony补丁管理
-- **特性**: 全局开关控制，场景切换监听，组件生命周期管理
+## 核心模块
 
-### 2. ChangeReaper.cs - 核心功能组件
-- **功能**: 实现所有Reaper护符的平衡性修改
-- **子模块**:
-  - 预制体缓存系统
-  - 响应式伤害计算
-  - 灵魂吸收范围修改
-  - 攻击动作替换
+### Plugin.cs
+- 插件入口点，BepInEx 配置初始化
+- Harmony 补丁注册
+- ModMenu 界面构建
+- 场景切换监听和组件生命周期管理
 
-### 3. ConfigGUI.cs - 配置界面
-- **功能**: 游戏内可视化配置面板
-- **特性**: 实时配置应用，中英文切换，用户友好界面
+### ChangeReaper.cs
+- 实现十字斩蓄力攻击
+- 伤害倍率计算
+- 丝球吸引逻辑
+- 攻击动作替换
 
-### 4. HeroControllerPatch.cs - Harmony补丁
-- **功能**: 修改HeroController的Reaper模式行为
-- **特性**: 条件性补丁应用，反射字段修改
+### HeroControllerPatch.cs
+- 修改 `BindCompleted` 方法延长收割者模式持续时间
+- 修改 `GetReaperPayout` 方法调整丝球掉落倍率
 
-### 5. AssetManager.cs - 资源管理
-- **功能**: 游戏资源加载和缓存
-- **特性**: 异步资源加载，预制体管理
-
-## 安装说明
-
-1. 确保已安装BepInEx框架
-2. 将ReaperBalance.dll放入`BepInEx/plugins`目录
-3. 启动游戏，模组将自动加载
-
-## 配置选项
-
-在游戏内通过 Mod Options 菜单配置，或编辑`BepInEx/config`目录下的配置文件：
-
-- `EnableReaperBalance`: 全局启用/禁用开关 (默认: true)
-- `UseChinese`: 是否使用中文菜单 (默认: true)
-- `EnableCrossSlash`: 是否启用十字斩 (默认: true)
-- `EnableSilkAttraction`: 是否吸引小丝球 (默认: true)
-- `CrossSlashScale`: 十字斩击缩放大小 (默认: 1.2)
-- `CrossSlashDamage`: 十字斩伤害倍率 (默认: 2.3)
-- `NormalAttackMultiplier`: 普通攻击倍率 (默认: 1.2)
-- `DownSlashMultiplier`: 下劈攻击倍率 (默认: 1.5)
-- `CollectRange`: 吸引范围 (默认: 8)
-- `CollectMaxSpeed`: 吸引最大速度 (默认: 20)
-- `CollectAcceleration`: 吸引加速度 (默认: 800)
-- `DurationMultiplier`: 持续时间倍率 (默认: 3.0)
+### HealthManagerCritPatch.cs
+- 拦截 `ApplyDamageScaling` 方法
+- 实现独立的暴击判定和伤害计算
 
 ## 技术特点
 
-- **模块化设计**: 各功能模块独立，便于维护和扩展
-- **错误处理**: 完善的异常处理和日志记录
-- **性能优化**: 预制体缓存，避免重复资源加载
-- **兼容性**: 遵循Harmony补丁最佳实践
+- **模块化设计** - 各功能模块独立，便于维护扩展
+- **响应式配置** - 配置修改实时生效，无需重启
+- **条件性补丁** - 仅在装备收割者纹章时应用修改
+- **性能优化** - 预制体缓存，避免重复资源加载
 
 ## 开发环境
 
-- Unity Engine
+- Unity 6000.0.50
 - .NET Standard 2.1
 - BepInEx 5.x
 - HarmonyX
+- Silksong.ModMenu
 
 ## 许可证
 
-本项目采用MIT许可证，详见LICENSE.md文件。
+MIT License
 
 ---
 
 # English Version
 
-## Project Overview
+## Introduction
 
-ReaperBalance is a balance modification mod for the Reaper charm in Silksong game. It dynamically modifies Reaper charm related functionalities through Harmony patches and Unity component system, providing configurable balance adjustment options.
+ReaperBalance is an enhancement mod for Silksong's Reaper Crest. When equipped, you'll gain more powerful combat abilities and a smoother gameplay experience. All features can be freely configured through the in-game menu.
 
-## Features
+## Main Features
 
-### 🎯 Core Features
-- **Global Toggle Control** - Enable/disable all balance modifications at any time
-- **Responsive Configuration Updates** - Configuration changes take effect in real-time without restarting the game
-- **Charm Equipment Detection** - Modifications only apply when Reaper charm is equipped
+### Combat Enhancement
+- **Cross Slash Charge Attack** - Release a powerful cross-shaped slash after charging
+- **Attack Damage Boost** - Independent damage multipliers for normal and down slash attacks
+- **Stun Bonus** - Stronger stun effects on all attacks
 
-### ⚔️ Combat Balance Adjustments
-- **Cross Slash Modifications**
-  - Configurable damage multiplier adjustments
-  - Custom attack scaling size
-  - Dynamic damage calculation based on nail upgrades
-- **Normal Attack Enhancement** - Configurable normal attack damage multiplier
-- **Down Slash Reinforcement** - Independent down slash damage multiplier
+### Reaper Mode Optimization
+- **Extended Duration** - Significantly longer Reaper mode duration
+- **Increased Silk Drops** - More silk orbs drop when attacking enemies
+- **Auto Silk Attraction** - Automatically attract silk orbs from a distance
 
-### 🔮 Soul System Optimization
-- **Soul Absorption Range Extension** - Configurable soul absorption detection range
-- **Reaper Mode Duration** - Extended Reaper mode duration
+### Critical System (Optional)
+- **Exclusive Crit Mechanic** - Independent critical hit system for Reaper Crest
+- **Configurable Crit Rate** - Custom crit chance (0-100%)
+- **Configurable Crit Damage** - Custom crit damage multiplier
 
-### 🎮 User Experience
-- **Visual Configuration Interface** - In-game GUI configuration panel
-- **Chinese/English Support** - Complete localization interface
-- **Real-time Log Output** - Detailed debugging information
+## Installation
 
-## Project Structure
+### Dependencies
+- [BepInEx](https://github.com/BepInEx/BepInEx) - Mod loading framework
+- [ModMenu](https://thunderstore.io/c/hollow-knight-silksong/p/silksong_modding/ModMenu/) - In-game configuration menu ([GitHub](https://github.com/silksong-modding/Silksong.ModMenu))
 
-Source/ 
-├── Plugin.cs # Main plugin entry, configuration management and Harmony patches 
-├── AssetManager.cs # Resource manager, responsible for prefab loading 
-├── Log.cs # Logging system ├── Behaviours/ 
-│ ├── ChangeReaper.cs # Core functionality component, handles all Reaper modifications 
-│ └── ConfigGUI.cs # Configuration interface implementation 
-└── Patches/ 
-└── HeroControllerPatch.cs # Harmony patch, modifies HeroController behavior
+### Steps
+1. Install BepInEx framework
+2. Install ModMenu mod
+3. Place `ReaperBalance.dll` into `BepInEx/plugins` directory
+4. Launch the game
 
-## Core Modules Detailed
+## Configuration
 
-### 1. Plugin.cs - Main Plugin Module
-- **Function**: Plugin entry point, configuration initialization, Harmony patch management
-- **Features**: Global toggle control, scene change listening, component lifecycle management
+Configure through the in-game **Mod Options** menu (supports Chinese/English), or edit `BepInEx/config/ReaperBalance.cfg`.
 
-### 2. ChangeReaper.cs - Core Functionality Component
-- **Function**: Implements all Reaper charm balance modifications
-- **Sub-modules**:
-  - Prefab caching system
-  - Responsive damage calculation
-  - Soul absorption range modification
-  - Attack action replacement
+### General Settings
+| Option | Description | Default |
+|--------|-------------|---------|
+| EnableReaperBalance | Global enable/disable toggle | true |
+| UseChinese | Use Chinese menu | true |
 
-### 3. ConfigGUI.cs - Configuration Interface
-- **Function**: In-game visual configuration panel
-- **Features**: Real-time configuration application, Chinese/English switching, user-friendly interface
+### Attack Settings
+| Option | Description | Default |
+|--------|-------------|---------|
+| EnableCrossSlash | Enable cross slash charge attack | true |
+| CrossSlashScale | Cross slash scale | 1.2 |
+| CrossSlashDamage | Cross slash damage multiplier | 2.3 |
+| NormalAttackMultiplier | Normal attack damage multiplier | 1.2 |
+| DownSlashMultiplier | Down slash damage multiplier | 1.5 |
+| StunDamageMultiplier | Stun damage multiplier | 1.2 |
 
-### 4. HeroControllerPatch.cs - Harmony Patch
-- **Function**: Modifies HeroController's Reaper mode behavior
-- **Features**: Conditional patch application, reflection field modification
+### Reaper Mode Settings
+| Option | Description | Default |
+|--------|-------------|---------|
+| DurationMultiplier | Reaper mode duration multiplier | 3.0 |
+| ReaperBundleMultiplier | Silk orb drop multiplier | 1.0 |
 
-### 5. AssetManager.cs - Resource Management
-- **Function**: Game resource loading and caching
-- **Features**: Asynchronous resource loading, prefab management
+### Silk Attraction Settings
+| Option | Description | Default |
+|--------|-------------|---------|
+| EnableSilkAttraction | Enable silk orb attraction | true |
+| CollectRange | Attraction range | 8 |
+| CollectMaxSpeed | Attraction max speed | 20 |
+| CollectAcceleration | Attraction acceleration | 800 |
 
-## Installation Instructions
-
-1. Ensure BepInEx framework is installed
-2. Place ReaperBalance.dll into `BepInEx/plugins` directory
-3. Launch the game, the mod will load automatically
-
-## Configuration Options
-
-Configure through the in-game Mod Options menu, or edit configuration files in `BepInEx/config` directory:
-
-- `EnableReaperBalance`: Global enable/disable toggle (Default: true)
-- `UseChinese`: Use Chinese menu language (Default: true)
-- `EnableCrossSlash`: Enable Cross Slash (Default: true)
-- `EnableSilkAttraction`: Enable silk orb attraction (Default: true)
-- `CrossSlashScale`: Cross slash scaling size (Default: 1.2)
-- `CrossSlashDamage`: Cross slash damage multiplier (Default: 2.3)
-- `NormalAttackMultiplier`: Normal attack multiplier (Default: 1.2)
-- `DownSlashMultiplier`: Down slash multiplier (Default: 1.5)
-- `CollectRange`: Attraction range (Default: 8)
-- `CollectMaxSpeed`: Max attraction speed (Default: 20)
-- `CollectAcceleration`: Attraction acceleration (Default: 800)
-- `DurationMultiplier`: Duration multiplier (Default: 3.0)
-
-## Technical Features
-
-- **Modular Design**: Independent functional modules for easy maintenance and extension
-- **Error Handling**: Comprehensive exception handling and logging
-- **Performance Optimization**: Prefab caching to avoid repeated resource loading
-- **Compatibility**: Follows Harmony patch best practices
-
-## Development Environment
-
-- Unity Engine
-- .NET Standard 2.1
-- BepInEx 5.x
-- HarmonyX
+### Critical Settings
+| Option | Description | Default |
+|--------|-------------|---------|
+| EnableReaperCrit | Enable Reaper crit system | false |
+| ReaperCritChancePercent | Crit chance (%) | 10 |
+| ReaperCritDamageMultiplier | Crit damage multiplier | 3.0 |
 
 ## License
 
-This project uses MIT License, see LICENSE.md file for details.
-
+MIT License

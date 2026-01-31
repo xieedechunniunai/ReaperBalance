@@ -153,9 +153,9 @@ public class Plugin : BaseUnityPlugin, IModMenuCustomMenu
     {
         // Create global toggle (will be placed in ControlsPane)
         var enabledChoice = new ChoiceElement<bool>(
-            Tr("Enable Reaper Balance", "启用Reaper平衡"),
+            Tr("Enable Reaper Balance", "启用收割者平衡"),
             ChoiceModels.ForBool(Tr("Disabled", "禁用"), Tr("Enabled", "启用")),
-            Tr("Enable or disable Reaper balance changes.", "启用或禁用Reaper平衡修改。")
+            Tr("Enable or disable Reaper balance changes.", "启用或禁用收割者平衡修改。")
         )
         {
             Value = IsReaperBalanceEnabled
@@ -263,7 +263,7 @@ public class Plugin : BaseUnityPlugin, IModMenuCustomMenu
         var enableCrossSlashChoice = new ChoiceElement<bool>(
             Tr("Enable Cross Slash", "启用十字斩"),
             ChoiceModels.ForBool(Tr("Disabled", "禁用"), Tr("Enabled", "启用")),
-            Tr("Enable or disable the Cross Slash heavy attack.", "启用或禁用十字斩重攻击。")
+            Tr("Enable or disable the Cross Slash heavy attack.", "启用或禁用十字斩蓄力攻击。")
         )
         {
             Value = EnableCrossSlash.Value
@@ -280,7 +280,7 @@ public class Plugin : BaseUnityPlugin, IModMenuCustomMenu
         };
         page1.Add(enableCrossSlashChoice);
         page1.Add(CreateFloatSlider(
-            Tr("Cross Slash Scale", "十字斩缩放"),
+            Tr("Cross Slash Scale", "十字斩缩放大小"),
             CrossSlashScale,
             0.5f,
             3.0f,
@@ -304,7 +304,7 @@ public class Plugin : BaseUnityPlugin, IModMenuCustomMenu
         // 持续时间倍率 - 使用 ChoiceElement 保持对齐
         page2.Add(CreateFloatChoice(
             Tr("Duration Multiplier", "持续时间倍率"),
-            Tr("Reaper mode duration multiplier", "Reaper模式持续时间倍率"),
+            Tr("Reaper mode duration multiplier", "收割者模式持续时间倍率"),
             DurationMultiplier,
             0.2f,
             10.0f,
@@ -312,8 +312,8 @@ public class Plugin : BaseUnityPlugin, IModMenuCustomMenu
             "ModMenu.DurationMultiplier"
         ));
         page2.Add(CreateFloatChoice(
-            Tr("Reaper Bundle Multiplier", "丝球掉落倍率"),
-            Tr("Silk orb drop rate multiplier", "攻击敌人时掉落丝球的倍率"),
+            Tr("Silk Orb Drop Multiplier", "丝球掉落倍率"),
+            Tr("Silk orb drop multiplier in Reaper mode", "收割模式攻击敌人时掉落丝球的倍率"),
             ReaperBundleMultiplier,
             0f,
             5.0f,
@@ -325,7 +325,7 @@ public class Plugin : BaseUnityPlugin, IModMenuCustomMenu
         var enableSilkAttractionChoice = new ChoiceElement<bool>(
             Tr("Enable Silk Attraction", "吸引小丝球"),
             ChoiceModels.ForBool(Tr("Disabled", "禁用"), Tr("Enabled", "启用")),
-            Tr("Enable or disable attracting silk orbs from a distance.", "启用或禁用远距离吸引小丝球。")
+            Tr("Attract silk orbs from a distance in Reaper mode.", "收割模式下远距离吸引小丝球。")
         )
         {
             Value = EnableSilkAttraction.Value
@@ -373,10 +373,10 @@ public class Plugin : BaseUnityPlugin, IModMenuCustomMenu
         var page3 = new VerticalGroup();
 
         var enableCritChoice = new ChoiceElement<bool>(
-            Tr("Enable Reaper Crit", "启用 Reaper 暴击"),
+            Tr("Enable Reaper Crit", "启用收割者暴击"),
             ChoiceModels.ForBool(Tr("Disabled", "禁用"), Tr("Enabled", "启用")),
             Tr("Enable Reaper-exclusive crit system (only works with Reaper Crest, overrides vanilla crit)",
-               "启用 Reaper 独享暴击系统（仅 Reaper 纹章生效，完全覆盖原版暴击判定）")
+               "启用收割者独享暴击系统（仅收割者纹章生效，完全覆盖原版暴击判定）")
         )
         {
             Value = EnableReaperCrit.Value
@@ -550,15 +550,15 @@ public class Plugin : BaseUnityPlugin, IModMenuCustomMenu
         StunDamageMultiplier = Config.Bind("ReaperBalance", "StunDamageMultiplier", 1.2f,
             "眩晕值倍率，影响普攻/下劈/十字斩的眩晕值 (默认: 1.2)");
         ReaperBundleMultiplier = Config.Bind("ReaperBalance", "ReaperBundleMultiplier", 1f,
-            "Reaper bundle 生成倍率，影响攻击敌人时掉落的丝球数量 (默认: 1.0)");
+            "小丝球掉落倍率，影响攻击敌人时掉落的丝球数量 (默认: 1.0)");
 
         // Reaper 暴击配置
         EnableReaperCrit = Config.Bind("ReaperCrit", "EnableReaperCrit", false,
-            "是否启用 Reaper 独享暴击系统（仅 Reaper 纹章生效，完全覆盖原版暴击判定）(默认: false)");
+            "是否启用收割者独享暴击系统（仅收割者纹章生效，完全覆盖原版暴击判定）(默认: false)");
         ReaperCritChancePercent = Config.Bind("ReaperCrit", "ReaperCritChancePercent", 10f,
-            "Reaper 暴击概率百分比 (默认: 10, 范围: 0-100)");
+            "收割者暴击概率百分比 (默认: 10, 范围: 0-100)");
         ReaperCritDamageMultiplier = Config.Bind("ReaperCrit", "ReaperCritDamageMultiplier", 3f,
-            "Reaper 暴击伤害倍率 (默认: 3.0, 范围: 1-5)");
+            "收割者暴击伤害倍率 (默认: 3.0, 范围: 1-5)");
 
         Log.Info("ReaperBalance配置已初始化");
     }
