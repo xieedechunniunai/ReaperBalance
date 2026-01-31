@@ -43,7 +43,7 @@ public class Plugin : BaseUnityPlugin, IModMenuCustomMenu
     public static ConfigEntry<float> DurationMultiplier { get; private set; } = null!;
     public static ConfigEntry<float> StunDamageMultiplier { get; private set; } = null!;
     public static ConfigEntry<float> ReaperBundleMultiplier { get; private set; } = null!;
-    
+
     // Reaper 暴击配置
     public static ConfigEntry<bool> EnableReaperCrit { get; private set; } = null!;
     public static ConfigEntry<float> ReaperCritChancePercent { get; private set; } = null!;
@@ -65,7 +65,10 @@ public class Plugin : BaseUnityPlugin, IModMenuCustomMenu
 
     private IEnumerator Initialize()
     {
-        yield return new WaitUntil(() => GameManager.instance != null);
+        while (GameManager.instance == null)
+        {
+            yield return new WaitForSeconds(1f);
+        }
         CreateManager();
     }
 
@@ -226,26 +229,29 @@ public class Plugin : BaseUnityPlugin, IModMenuCustomMenu
         };
         page1.Add(languageChoice);
 
-        // 通用攻击倍率 - 独立设置项
-        page1.Add(CreateFloatSlider(
+        // 通用攻击倍率 - 使用 ChoiceElement 保持对齐
+        var normalAttackChoice = CreateFloatChoice(
             Tr("Normal Attack Multiplier", "普通攻击倍率"),
+            Tr("Damage multiplier for normal attacks", "普通攻击的伤害倍率"),
             NormalAttackMultiplier,
             0.1f,
             3.0f,
             0.1f,
             "ModMenu.NormalAttackMultiplier"
-        ));
-        page1.Add(CreateFloatSlider(
+        );
+        page1.Add(normalAttackChoice);
+        page1.Add(CreateFloatChoice(
             Tr("Down Slash Multiplier", "下劈攻击倍率"),
+            Tr("Damage multiplier for down slash attacks", "下劈攻击的伤害倍率"),
             DownSlashMultiplier,
             0.1f,
             4.0f,
             0.1f,
             "ModMenu.DownSlashMultiplier"
         ));
-        page1.Add(CreateFloatSliderWithDescription(
+        page1.Add(CreateFloatChoice(
             Tr("Stun Damage Multiplier", "眩晕值倍率"),
-            Tr("Normal/Down/Cross", "普攻/下劈/十字斩"),
+            Tr("Stun damage multiplier (Normal/Down/Cross)", "影响普攻/下劈/十字斩的眩晕值"),
             StunDamageMultiplier,
             0f,
             5.0f,
@@ -273,7 +279,6 @@ public class Plugin : BaseUnityPlugin, IModMenuCustomMenu
             }
         };
         page1.Add(enableCrossSlashChoice);
-
         page1.Add(CreateFloatSlider(
             Tr("Cross Slash Scale", "十字斩缩放"),
             CrossSlashScale,
@@ -296,17 +301,19 @@ public class Plugin : BaseUnityPlugin, IModMenuCustomMenu
         // Page 2: 持续时间, 丝球吸引设置
         var page2 = new VerticalGroup();
 
-        // 持续时间倍率 - 独立设置项
-        page2.Add(CreateFloatSlider(
+        // 持续时间倍率 - 使用 ChoiceElement 保持对齐
+        page2.Add(CreateFloatChoice(
             Tr("Duration Multiplier", "持续时间倍率"),
+            Tr("Reaper mode duration multiplier", "Reaper模式持续时间倍率"),
             DurationMultiplier,
             0.2f,
             10.0f,
-            0.1f,
+            0.2f,
             "ModMenu.DurationMultiplier"
         ));
-        page2.Add(CreateFloatSlider(
+        page2.Add(CreateFloatChoice(
             Tr("Reaper Bundle Multiplier", "丝球掉落倍率"),
+            Tr("Silk orb drop rate multiplier", "攻击敌人时掉落丝球的倍率"),
             ReaperBundleMultiplier,
             0f,
             5.0f,
@@ -407,22 +414,6 @@ public class Plugin : BaseUnityPlugin, IModMenuCustomMenu
         return menu;
     }
 
-    private static SliderElement<float> CreateFloatSliderWithDescription(
-        string label,
-        string description,
-        ConfigEntry<float> entry,
-        float min,
-        float max,
-        float step,
-        string refreshReason
-    )
-    {
-        // 注意：该 ModMenu UI 对富文本/换行支持不稳定，可能导致字号异常和布局错乱。
-        // 因此将描述压缩到同一行，避免换行与富文本标签。
-        string labelWithDesc = $"{label} ({description})";
-        return CreateFloatSlider(labelWithDesc, entry, min, max, step, refreshReason);
-    }
-
     private static SliderElement<float> CreateFloatSlider(
         string label,
         ConfigEntry<float> entry,
@@ -466,6 +457,66 @@ public class Plugin : BaseUnityPlugin, IModMenuCustomMenu
 
         return element;
     }
+
+    /// <summary>
+    /// 创建浮点数选项的 ChoiceElement（用于顶级设置项，与 ChoiceElement 对齐）
+    /// </summary>
+    private static ChoiceElement<float> CreateFloatChoice(
+        string label,
+        string description,
+        ConfigEntry<float> entry,
+        float min,
+        float max,
+        float step,
+        string refreshReason
+    )
+    {
+        // 生成离散值列表
+        var values = new System.Collections.Generic.List<float>();
+        for (float v = min; v <= max + step * 0.5f; v += step)
+        {
+            values.Add((float)System.Math.Round(v, 3));
+        }
+
+        var model = new ListChoiceModel<float>(values)
+        {
+            Circular = false,
+            DisplayFn = (_, v) => v.ToString("0.###")
+        };
+
+        // 设置初始值（找到最接近的）
+        float clamped = Mathf.Clamp(entry.Value, min, max);
+        int closestIndex = 0;
+        float minDiff = float.MaxValue;
+        for (int i = 0; i < values.Count; i++)
+        {
+            float diff = Mathf.Abs(values[i] - clamped);
+            if (diff < minDiff)
+            {
+                minDiff = diff;
+                closestIndex = i;
+            }
+        }
+        model.Index = closestIndex;
+
+        var element = new ChoiceElement<float>(label, model, description)
+        {
+            Value = values[closestIndex]
+        };
+
+        model.OnValueChanged += value =>
+        {
+            entry.Value = value;
+            var plugin = FindPlugin();
+            if (plugin != null)
+            {
+                plugin.RefreshReaperBalance(refreshReason, true);
+            }
+        };
+
+        return element;
+    }
+
     /// <summary>
     /// 初始化配置变量
     /// </summary>
@@ -500,7 +551,7 @@ public class Plugin : BaseUnityPlugin, IModMenuCustomMenu
             "眩晕值倍率，影响普攻/下劈/十字斩的眩晕值 (默认: 1.2)");
         ReaperBundleMultiplier = Config.Bind("ReaperBalance", "ReaperBundleMultiplier", 1f,
             "Reaper bundle 生成倍率，影响攻击敌人时掉落的丝球数量 (默认: 1.0)");
-        
+
         // Reaper 暴击配置
         EnableReaperCrit = Config.Bind("ReaperCrit", "EnableReaperCrit", false,
             "是否启用 Reaper 独享暴击系统（仅 Reaper 纹章生效，完全覆盖原版暴击判定）(默认: false)");
