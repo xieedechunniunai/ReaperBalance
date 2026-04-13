@@ -370,13 +370,23 @@ internal sealed class ChangeReaper : MonoBehaviour
 
     /// <summary>
     /// 同步单个 damager 的动态效果
+    /// 
+    /// 重要修复说明 (2026-02-01):
+    /// 移除了手动的 poisonTicks/zapTicks 覆盖逻辑。
+    /// 
+    /// 原因：DamageEnemies.OverridePoisonDamage() 会设置 isPoisonDamageOverridden = true，
+    /// 这会导致 PoisonDamageTicks 属性绕过 Gameplay.PoisonPouchTool.Status.IsEquipped 检查。
+    /// 结果是即使毒火工具过期，十字斩仍会附带毒效果。
+    /// 
+    /// 修复方案：让 DamageEnemies 使用其原生的 PoisonDamageTicks/ZapDamageTicks 属性，
+    /// 这些属性会自动检查对应工具是否装备，无需手动同步。
     /// </summary>
     private void SyncSingleDamagerDynamicEffects(
         GameObject damagerObject, 
         NailImbuementConfig nailImbuement, 
         NailElements nailElement,
-        int poisonTicks,
-        int zapTicks,
+        int poisonTicks,  // 参数保留以兼容调用签名，但不再使用
+        int zapTicks,     // 参数保留以兼容调用签名，但不再使用
         string damagerName)
     {
         DamageEnemies targetDamager = damagerObject.GetComponent<DamageEnemies>();
@@ -387,26 +397,20 @@ internal sealed class ChangeReaper : MonoBehaviour
         }
 
         // 同步 NailImbuement 和 NailElement（公开属性，可直接设置）
+        // 这会影响火焰Imbuement的视觉效果和伤害加成
         targetDamager.NailImbuement = nailImbuement;
         targetDamager.NailElement = nailElement;
 
-        // 同步毒刀 ticks（使用公开方法）
-        if (poisonTicks > 0)
-        {
-            targetDamager.OverridePoisonDamage(poisonTicks);
-        }
-
-        // 同步电刀 ticks（需要反射设置私有字段）
-        if (zapTicks > 0)
-        {
-            var damagerType = typeof(DamageEnemies);
-            var zapTicksField = damagerType.GetField("zapDamageTicks", 
-                BindingFlags.NonPublic | BindingFlags.Instance);
-            if (zapTicksField != null)
-            {
-                zapTicksField.SetValue(targetDamager, zapTicks);
-            }
-        }
+        // ★ 修复: 移除毒刀/电刀 override 逻辑 ★
+        // 
+        // 原生的 DamageEnemies.PoisonDamageTicks 属性会自动检查:
+        //   - Gameplay.PoisonPouchTool.Status.IsEquipped
+        // 
+        // 原生的 DamageEnemies.ZapDamageTicks 属性会自动检查:
+        //   - Gameplay.ZapImbuementTool.Status.IsEquipped
+        //
+        // 不需要手动同步，让原生逻辑处理即可。
+        // 这样当工具过期时，属性会自动返回 0，不会造成DOT效果。
     }
     /// <summary>
     /// 更新预制体缩放大小
